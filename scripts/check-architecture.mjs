@@ -1,0 +1,197 @@
+import { readFile, readdir } from "node:fs/promises";
+import path from "node:path";
+
+const root = process.cwd();
+const src = path.join(root, "src");
+const files = await walk(src);
+const violations = [];
+const childProcessAllowed = new Set([
+  "src/core/runtime/command-runner.ts",
+  "src/plugins/process/infrastructure/pipe-process-backend.ts",
+  "src/plugins/computer/computer-native-host.ts",
+]);
+const platformBranchAllowed = [
+  "src/config/platform-paths.ts",
+  "src/plugins/process/infrastructure/",
+  "src/plugins/computer/computer-native-host.ts",
+];
+
+for (const file of files.filter((entry) => /\.(?:ts|tsx|vue)$/.test(entry))) {
+  const relative = path.relative(root, file).split(path.sep).join("/");
+  const content = await readFile(file, "utf8");
+
+  if (!relative.startsWith("src/plugins/web/ui/")) {
+    for (const match of content.matchAll(
+      /(?:from\s+|import\s*\(\s*)["']((?:\.\.\/)+[^"']+)["']/g,
+    )) {
+      const specifier = match[1];
+      const parentPrefix = /^(?:\.\.\/)+/.exec(specifier)?.[0] ?? "";
+      const parentDepth = parentPrefix.length / 3;
+      if (parentDepth > 1) {
+        violations.push(
+          `${relative}: deep parent import "${specifier}" is not allowed; use a #<area>/... package import`,
+        );
+        continue;
+      }
+
+      const sourceParts = path.relative(src, file).split(path.sep);
+      const target = path.resolve(path.dirname(file), specifier);
+      const targetParts = path.relative(src, target).split(path.sep);
+      if (targetParts[0] === ".." || sourceParts[0] !== targetParts[0]) {
+        violations.push(
+          `${relative}: cross-area parent import "${specifier}" is not allowed; use a #<area>/... package import`,
+        );
+        continue;
+      }
+
+      if (
+        sourceParts[0] === "plugins" &&
+        sourceParts.length > 2 &&
+        targetParts.length > 2 &&
+        sourceParts[1] !== targetParts[1]
+      ) {
+        violations.push(
+          `${relative}: plugin parent import "${specifier}" crosses plugin boundaries`,
+        );
+      }
+    }
+  }
+
+  if (
+    content.includes("node:child_process") &&
+    !childProcessAllowed.has(relative)
+  ) {
+    violations.push(
+      `${relative}: child_process is outside an approved runtime backend`,
+    );
+  }
+
+  if (
+    content.includes("process.platform") &&
+    !platformBranchAllowed.some(
+      (allowed) => relative === allowed || relative.startsWith(allowed),
+    )
+  ) {
+    violations.push(
+      `${relative}: platform branching is outside an approved platform boundary`,
+    );
+  }
+
+  if (
+    relative.startsWith("src/core/") &&
+    /(?:@modelcontextprotocol|express|vue|vuetify|from\s+["'][^"']*(?:infrastructure|plugins|mcp|presentation|web)\/)/i.test(
+      content,
+    )
+  ) {
+    violations.push(
+      `${relative}: core depends on an adapter, plugin, protocol, or UI layer`,
+    );
+  }
+
+  if (
+    (relative.startsWith("src/mcp/") ||
+      relative.startsWith("src/presentation/")) &&
+    /from\s+["'][^"']*infrastructure\//.test(content)
+  ) {
+    violations.push(
+      `${relative}: protocol/presentation layer bypasses the application boundary`,
+    );
+  }
+
+  const plugin = /^src\/plugins\/([^/]+)\//.exec(relative)?.[1];
+  if (plugin && plugin !== "web") {
+    for (const match of content.matchAll(
+      /(?:from\s+|import\s*\(\s*)["']#plugins\/([^/"']+)\//g,
+    )) {
+      const dependency = match[1];
+      if (dependency !== plugin) {
+        violations.push(
+          `${relative}: ${plugin} plugin must not depend on ${dependency} plugin`,
+        );
+      }
+    }
+  }
+
+  if (relative.endsWith(".tsx")) {
+    violations.push(`${relative}: WebUI is Vue/Vuetify; TSX is not allowed`);
+  }
+  if (/from\s+["']react(?:\/|["'])/.test(content)) {
+    violations.push(
+      `${relative}: WebUI must use Vue/Vuetify; React is not allowed`,
+    );
+  }
+}
+
+for (const relative of [
+  "src/infrastructure/http/http-server.ts",
+  "src/app/application.ts",
+]) {
+  const lines = (await readFile(path.join(root, relative), "utf8")).split(
+    /\r?\n/,
+  ).length;
+  if (lines > 250) {
+    violations.push(
+      `${relative}: composition/server entry exceeded 250 lines (${lines})`,
+    );
+  }
+}
+
+const pkg = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
+const sourceAreas = (await readdir(src, { withFileTypes: true }))
+  .filter((entry) => entry.isDirectory())
+  .map((entry) => entry.name)
+  .sort();
+for (const area of sourceAreas) {
+  const key = `#${area}/*`;
+  const mapping = pkg.imports?.[key];
+  if (
+    mapping?.["chatroom-source"] !== `./src/${area}/*.ts` ||
+    mapping?.default !== `./dist/${area}/*.js`
+  ) {
+    violations.push(
+      `package.json: missing or invalid internal import mapping ${key}`,
+    );
+  }
+}
+
+const dependencies = {
+  ...(pkg.dependencies ?? {}),
+  ...(pkg.devDependencies ?? {}),
+};
+if (
+  dependencies.react ||
+  dependencies["react-dom"] ||
+  dependencies["@vitejs/plugin-react"]
+) {
+  violations.push(
+    "package.json: WebUI must use Vue/Vuetify; React packages are not allowed",
+  );
+}
+for (const required of ["vue", "vuetify"]) {
+  if (!dependencies[required]) {
+    violations.push(
+      `package.json: missing required WebUI dependency ${required}`,
+    );
+  }
+}
+
+if (violations.length > 0) {
+  console.error(
+    `Architecture invariant violations:\n${violations.map((value) => `- ${value}`).join("\n")}`,
+  );
+  process.exitCode = 1;
+} else {
+  console.log(
+    `Architecture invariants passed across ${files.length} source files.`,
+  );
+}
+
+async function walk(directory) {
+  const output = [];
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const target = path.join(directory, entry.name);
+    if (entry.isDirectory()) output.push(...(await walk(target)));
+    else output.push(target);
+  }
+  return output;
+}
