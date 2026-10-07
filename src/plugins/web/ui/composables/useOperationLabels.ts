@@ -8,8 +8,8 @@ import {
 export function useOperationLabels() {
   const locale = useLocale();
 
-  function actionLabel(action: string): string {
-    const key = actionMessageKey(action);
+  function actionLabel(pluginId: string, action: string): string {
+    const key = actionMessageKey(pluginId, action);
     return key ? locale.t(key) : humanizeAction(action);
   }
 

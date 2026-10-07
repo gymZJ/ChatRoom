@@ -1,11 +1,12 @@
 import type { InternalPlugin } from "#plugins/types";
-import { createServiceToken } from "#plugins/types";
+import { createServiceToken } from "#app/service-registry";
 import { PipeProcessBackend } from "./infrastructure/pipe-process-backend.js";
 import { PtyProcessBackend } from "./infrastructure/pty-process-backend.js";
 import { registerProcessTools } from "./mcp.js";
 import { ProcessSupervisor } from "./process-supervisor.js";
 
-export const ProcessService = createServiceToken<ProcessSupervisor>("process");
+export const ProcessServiceToken =
+  createServiceToken<ProcessSupervisor>("process");
 
 export function createProcessPlugin(): InternalPlugin {
   let service: ProcessSupervisor | null = null;
@@ -21,7 +22,7 @@ export function createProcessPlugin(): InternalPlugin {
         context.config.process.defaultTimeoutMs,
         context.config.process.maxCompletedProcesses,
       );
-      context.services.provide(ProcessService, service);
+      context.services.provide(ProcessServiceToken, service);
     },
     registerMcp(mcp) {
       if (!service) throw new Error("Process plugin is not active");

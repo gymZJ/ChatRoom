@@ -44,7 +44,11 @@ export class OperationLog {
       durationMs: null,
     };
     this.repository.insert(operation);
-    this.eventBus.emit({ type: "operation", operation });
+    this.eventBus.emit({
+      type: "operation",
+      operationId: operation.operationId,
+      pluginId: operation.pluginId,
+    });
     return operation;
   }
 
@@ -72,7 +76,11 @@ export class OperationLog {
       finishedAt.getTime() - new Date(operation.startedAt).getTime(),
     );
     this.repository.update(operation);
-    this.eventBus.emit({ type: "operation", operation });
+    this.eventBus.emit({
+      type: "operation",
+      operationId: operation.operationId,
+      pluginId: operation.pluginId,
+    });
     return operation;
   }
 
@@ -109,13 +117,17 @@ export class OperationLog {
     if (references.processId !== undefined)
       operation.processId = references.processId;
     this.repository.update(operation);
-    this.eventBus.emit({ type: "operation", operation });
+    this.eventBus.emit({
+      type: "operation",
+      operationId: operation.operationId,
+      pluginId: operation.pluginId,
+    });
     return operation;
   }
 
   clearHistory(): { deleted: number; preserved: number } {
     const result = this.repository.clearHistory();
-    this.eventBus.emit({ type: "operations-cleared", ...result });
+    this.eventBus.emit({ type: "operations-cleared" });
     return result;
   }
 

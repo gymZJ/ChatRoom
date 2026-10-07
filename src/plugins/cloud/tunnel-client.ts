@@ -439,18 +439,13 @@ function publicHost(lease: CloudLeaseState, service: PublicService): string {
 }
 
 function allowedPath(service: PublicService, value: string): boolean {
-  const pathname = new URL(value, "http://localhost").pathname;
-  if (service === "mcp")
-    return (
-      pathname === "/mcp" ||
-      pathname.startsWith("/.well-known/oauth-") ||
-      pathname.startsWith("/oauth/")
-    );
-  return (
-    pathname !== "/mcp" &&
-    !pathname.startsWith("/oauth/") &&
-    !pathname.startsWith("/.well-known/oauth-")
-  );
+  const pathname = new URL(value, "http://localhost").pathname.toLowerCase();
+  const mcpPath = pathname === "/mcp" || pathname.startsWith("/mcp/");
+  const oauthPath =
+    pathname.startsWith("/oauth/") ||
+    pathname.startsWith("/.well-known/oauth-");
+  if (service === "mcp") return mcpPath || oauthPath;
+  return !mcpPath && !oauthPath;
 }
 function sanitizeHeaders(
   headers: Record<string, string>,

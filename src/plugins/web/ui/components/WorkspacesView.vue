@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from "vue";
+import { onMounted, shallowRef, watch } from "vue";
 import { useLocale } from "vuetify";
 import { api, type WorkspaceEntry } from "../api.js";
 import { errorMessage } from "../utils/errors.js";
@@ -10,17 +10,17 @@ import WorkspaceGitPane from "./WorkspaceGitPane.vue";
 import WorkspacePromptPane from "./WorkspacePromptPane.vue";
 import WorkspaceSkillsPane from "./WorkspaceSkillsPane.vue";
 
-const items = ref<WorkspaceEntry[]>([]);
-const allowedRoots = ref<string[]>([]);
-const selectedRoot = ref<string | null>(
+const items = shallowRef<WorkspaceEntry[]>([]);
+const allowedRoots = shallowRef<string[]>([]);
+const selectedRoot = shallowRef<string | null>(
   window.localStorage.getItem("chatroom.workspace.root"),
 );
-const tab = ref("git");
-const loading = ref(false);
-const error = ref("");
-const createOpen = ref(false);
-const creating = ref(false);
-const createError = ref("");
+const tab = shallowRef("git");
+const loading = shallowRef(false);
+const error = shallowRef("");
+const createOpen = shallowRef(false);
+const creating = shallowRef(false);
+const createError = shallowRef("");
 const locale = useLocale();
 const loadRequests = createRequestGate();
 
@@ -52,6 +52,7 @@ async function load() {
 }
 
 async function createProject(parent: string, name: string) {
+  if (creating.value) return;
   creating.value = true;
   createError.value = "";
   try {
@@ -81,6 +82,7 @@ async function createProject(parent: string, name: string) {
               items.map((item) => ({ title: item.name, value: item.root }))
             "
             :loading="loading"
+            :aria-label="locale.t('$vuetify.chatroom.workspaces.workspace')"
             density="compact"
             variant="outlined"
             hide-details
@@ -127,7 +129,9 @@ async function createProject(parent: string, name: string) {
 
       <template v-if="selectedRoot">
         <v-tabs v-model="tab" density="compact" class="workspace-tabs">
-          <v-tab value="git">Git</v-tab>
+          <v-tab value="git">{{
+            locale.t("$vuetify.chatroom.workspaces.git")
+          }}</v-tab>
           <v-tab value="prompt">{{
             locale.t("$vuetify.chatroom.workspaces.prompt")
           }}</v-tab>

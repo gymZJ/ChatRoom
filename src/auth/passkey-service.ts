@@ -204,7 +204,7 @@ function requireOrigin(origin: WebAuthnOrigin | null): WebAuthnOrigin {
   if (!origin)
     throw new ChatRoomError(
       "UNSUPPORTED",
-      "Passkeys require a secure public WebUI origin",
+      "Passkeys require a secure public Web UI origin",
     );
   return origin;
 }

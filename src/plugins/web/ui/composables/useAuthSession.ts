@@ -1,4 +1,4 @@
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, shallowRef } from "vue";
 import { useLocale } from "vuetify";
 import { api, type AuthStatus, type PasskeySummary } from "../api.js";
 import { errorMessage } from "../utils/errors.js";
@@ -21,20 +21,21 @@ interface AuthSessionOptions {
 
 export function useAuthSession(options: AuthSessionOptions) {
   const locale = useLocale();
-  const authenticated = ref<boolean | null>(null);
-  const passkeyServerAvailable = ref(false);
-  const passkeyRegistered = ref(false);
-  const passkeyBrowserAvailable = ref(
+  const authenticated = shallowRef<boolean | null>(null);
+  const passkeyServerAvailable = shallowRef(false);
+  const passkeyRegistered = shallowRef(false);
+  const passkeyBrowserAvailable = shallowRef(
     typeof window.PublicKeyCredential !== "undefined",
   );
-  const passkeyBusy = ref(false);
-  const passkeyDialog = ref(false);
-  const passkeys = ref<PasskeySummary[]>([]);
-  const passkeyName = ref("");
-  const token = ref("");
-  const remember = ref(true);
-  const loginError = ref("");
-  const passkeyError = ref("");
+  const passkeyBusy = shallowRef(false);
+  const loginBusy = shallowRef(false);
+  const passkeyDialog = shallowRef(false);
+  const passkeys = shallowRef<PasskeySummary[]>([]);
+  const passkeyName = shallowRef("");
+  const token = shallowRef("");
+  const remember = shallowRef(true);
+  const loginError = shallowRef("");
+  const passkeyError = shallowRef("");
 
   const canUsePasskeys = computed(
     () => passkeyServerAvailable.value && passkeyBrowserAvailable.value,
@@ -55,6 +56,8 @@ export function useAuthSession(options: AuthSessionOptions) {
   }
 
   async function login() {
+    if (loginBusy.value || passkeyBusy.value || !token.value.trim()) return;
+    loginBusy.value = true;
     loginError.value = "";
     try {
       await api("/auth/login", {
@@ -67,10 +70,13 @@ export function useAuthSession(options: AuthSessionOptions) {
       completeLogin();
     } catch (cause) {
       loginError.value = errorMessage(cause);
+    } finally {
+      loginBusy.value = false;
     }
   }
 
   async function loginWithPasskey() {
+    if (loginBusy.value || passkeyBusy.value) return;
     loginError.value = "";
     passkeyBusy.value = true;
     try {
@@ -128,6 +134,7 @@ export function useAuthSession(options: AuthSessionOptions) {
   }
 
   async function registerPasskey() {
+    if (passkeyBusy.value) return;
     passkeyError.value = "";
     passkeyBusy.value = true;
     try {
@@ -156,6 +163,8 @@ export function useAuthSession(options: AuthSessionOptions) {
   }
 
   async function removePasskey(id: string) {
+    if (passkeyBusy.value) return;
+    passkeyBusy.value = true;
     passkeyError.value = "";
     try {
       await api(`/auth/passkeys/${encodeURIComponent(id)}`, {
@@ -164,6 +173,8 @@ export function useAuthSession(options: AuthSessionOptions) {
       await loadPasskeys();
     } catch (cause) {
       passkeyError.value = errorMessage(cause);
+    } finally {
+      passkeyBusy.value = false;
     }
   }
 
@@ -172,6 +183,7 @@ export function useAuthSession(options: AuthSessionOptions) {
     canUsePasskeys,
     passkeyRegistered,
     passkeyBusy,
+    loginBusy,
     passkeyDialog,
     passkeys,
     passkeyName,

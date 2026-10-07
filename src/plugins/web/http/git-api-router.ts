@@ -5,7 +5,7 @@ import {
   requireString,
   requireStringArray,
 } from "#presentation/http/http-utils";
-import type { GitStatus } from "#plugins/git/types";
+import type { GitStatus } from "#app/git-access";
 import type { WebRuntime } from "#plugins/web/runtime";
 
 export function createGitApiRouter(application: WebRuntime): Router {

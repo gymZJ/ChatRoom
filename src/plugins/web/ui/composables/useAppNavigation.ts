@@ -3,12 +3,15 @@ import {
   defineAsyncComponent,
   onBeforeUnmount,
   onMounted,
-  ref,
+  shallowRef,
   type Component,
 } from "vue";
 
+import AsyncViewStatus from "../components/AsyncViewStatus.vue";
+
 export type View =
   | "workspaces"
+  | "agents"
   | "processes"
   | "computer"
   | "tools"
@@ -22,79 +25,102 @@ interface ViewDefinition {
   titleKey: string;
   icon: string;
   component: Component;
+  preload: () => Promise<unknown>;
+}
+
+function viewDefinition(
+  definition: Omit<ViewDefinition, "component" | "preload"> & {
+    load: () => Promise<{ default: Component }>;
+  },
+): ViewDefinition {
+  let pending: Promise<{ default: Component }> | null = null;
+  const load = () => {
+    if (!pending)
+      pending = definition.load().catch((error) => {
+        pending = null;
+        throw error;
+      });
+    return pending;
+  };
+  return {
+    id: definition.id,
+    path: definition.path,
+    titleKey: definition.titleKey,
+    icon: definition.icon,
+    component: defineAsyncComponent({
+      loader: load,
+      loadingComponent: AsyncViewStatus,
+      errorComponent: AsyncViewStatus,
+      delay: 120,
+    }),
+    preload: load,
+  };
 }
 
 const definitions: readonly ViewDefinition[] = [
-  {
+  viewDefinition({
     id: "workspaces",
     path: "/",
     titleKey: "nav.workspaces",
     icon: "$mdiFolderOutline",
-    component: defineAsyncComponent(
-      () => import("../components/WorkspacesView.vue"),
-    ),
-  },
-  {
+    load: () => import("../components/WorkspacesView.vue"),
+  }),
+  viewDefinition({
+    id: "agents",
+    path: "/agents",
+    titleKey: "nav.agents",
+    icon: "$mdiMessageTextOutline",
+    load: () => import("../components/AgentView.vue"),
+  }),
+  viewDefinition({
     id: "processes",
     path: "/processes",
     titleKey: "nav.processes",
     icon: "$mdiConsoleLine",
-    component: defineAsyncComponent(
-      () => import("../components/ProcessesView.vue"),
-    ),
-  },
-  {
+    load: () => import("../components/ProcessesView.vue"),
+  }),
+  viewDefinition({
     id: "computer",
     path: "/computer",
     titleKey: "nav.computer",
     icon: "$mdiMonitor",
-    component: defineAsyncComponent(
-      () => import("../components/ComputerView.vue"),
-    ),
-  },
-  {
+    load: () => import("../components/ComputerView.vue"),
+  }),
+  viewDefinition({
     id: "tools",
     path: "/tools",
     titleKey: "nav.mcpTools",
     icon: "$mdiTuneVariant",
-    component: defineAsyncComponent(
-      () => import("../components/McpToolsView.vue"),
-    ),
-  },
-  {
+    load: () => import("../components/McpToolsView.vue"),
+  }),
+  viewDefinition({
     id: "cloud",
     path: "/cloud",
     titleKey: "nav.cloud",
     icon: "$mdiCloudOutline",
-    component: defineAsyncComponent(
-      () => import("../components/CloudView.vue"),
-    ),
-  },
-  {
+    load: () => import("../components/CloudView.vue"),
+  }),
+  viewDefinition({
     id: "operations",
     path: "/operations",
     titleKey: "nav.operations",
     icon: "$mdiTextBoxOutline",
-    component: defineAsyncComponent(
-      () => import("../components/OperationsView.vue"),
-    ),
-  },
-  {
+    load: () => import("../components/OperationsView.vue"),
+  }),
+  viewDefinition({
     id: "systemLogs",
     path: "/system-logs",
     titleKey: "nav.systemLogs",
     icon: "$mdiTextSearch",
-    component: defineAsyncComponent(
-      () => import("../components/SystemLogsView.vue"),
-    ),
-  },
+    load: () => import("../components/SystemLogsView.vue"),
+  }),
 ] as const;
 
 const byId = new Map(definitions.map((item) => [item.id, item]));
 const byPath = new Map(definitions.map((item) => [item.path, item.id]));
 
 export function useAppNavigation() {
-  const view = ref<View>(viewFromPath());
+  const view = shallowRef<View>(viewFromPath());
   const current = computed(() => byId.get(view.value)!);
 
   onMounted(() => {
@@ -115,6 +141,13 @@ export function useAppNavigation() {
     window.history.replaceState(null, "", "/");
   }
 
+  function prefetch(next: View) {
+    void byId
+      .get(next)
+      ?.preload()
+      .catch(() => undefined);
+  }
+
   function syncFromPath() {
     const resolved = byPath.get(window.location.pathname);
     if (!resolved) {
@@ -125,7 +158,14 @@ export function useAppNavigation() {
     view.value = resolved;
   }
 
-  return { view, current, definitions, navigate, reset };
+  return {
+    view,
+    current,
+    definitions,
+    navigate,
+    reset,
+    prefetch,
+  };
 }
 
 function viewFromPath(): View {

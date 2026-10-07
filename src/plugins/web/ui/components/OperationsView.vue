@@ -1,37 +1,46 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, ref, watch } from "vue";
+import {
+  nextTick,
+  onBeforeUnmount,
+  useTemplateRef,
+  watch,
+  shallowRef,
+} from "vue";
 import { useDisplay, useLocale } from "vuetify";
-import { api, type Operation } from "../api.js";
-import { errorMessage } from "../utils/errors.js";
-import { createRequestGate } from "../utils/requests.js";
-import OperationTable from "./OperationTable.vue";
+import type { Operation } from "../api.js";
+import { useOperations } from "../composables/useOperations.js";
+import { useMasterDetailFocus } from "../composables/useMasterDetailFocus.js";
+import type { OperationRefreshBatch } from "../composables/useRuntimeEvents.js";
 import OperationDetail from "./OperationDetail.vue";
+import OperationTable from "./OperationTable.vue";
 
-const props = defineProps<{ revision: number }>();
-const events = ref<Operation[]>([]);
-const selected = ref<string | null>(null);
-const detail = ref<Operation | null>(null);
-const filter = ref("all");
-const clearDialog = ref(false);
-const clearing = ref(false);
-const loadingMore = ref(false);
-const hasMore = ref(false);
-const error = ref("");
-const loadSentinel = ref<HTMLElement | null>(null);
+const props = defineProps<{
+  revision: number;
+  changes: OperationRefreshBatch | null;
+}>();
 const locale = useLocale();
 const { mdAndDown: compact } = useDisplay();
-const layout = ref<HTMLElement | null>(null);
-const PAGE_SIZE = 50;
-const listRequests = createRequestGate();
-const detailRequests = createRequestGate();
+const loadSentinel = useTemplateRef<HTMLElement>("loadSentinel");
+const clearDialog = shallowRef(false);
+const { focusDetail, focusMaster } = useMasterDetailFocus(compact);
+const operations = useOperations(
+  () => props.revision,
+  () => props.changes,
+);
+const {
+  events,
+  selected,
+  detail,
+  filter,
+  loadingMore,
+  hasMore,
+  clearing,
+  error,
+  limitReached,
+} = operations;
+
 let loadObserver: IntersectionObserver | null = null;
 
-watch(filter, () => void loadInitial(), { immediate: true });
-watch(
-  () => props.revision,
-  () => void refreshLoaded(),
-);
-watch(selected, () => void loadDetail());
 watch(
   loadSentinel,
   (element) => {
@@ -40,7 +49,8 @@ watch(
     if (!element) return;
     loadObserver = new IntersectionObserver(
       (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) void loadMore();
+        if (entries.some((entry) => entry.isIntersecting))
+          void operations.loadMore();
       },
       { rootMargin: "240px 0px" },
     );
@@ -49,141 +59,36 @@ watch(
   { flush: "post" },
 );
 
+watch(
+  () => [events.value.length, hasMore.value, loadingMore.value] as const,
+  () => void continueLoadingIfVisible(),
+  { flush: "post" },
+);
+
 onBeforeUnmount(() => loadObserver?.disconnect());
-
-function operationsUrl(limit: number, offset = 0): string {
-  const status =
-    filter.value === "all" ? "" : `&status=${encodeURIComponent(filter.value)}`;
-  return `/operations?limit=${limit}&offset=${offset}${status}`;
-}
-
-async function loadInitial() {
-  const request = listRequests.begin();
-  loadingMore.value = true;
-  error.value = "";
-  try {
-    const page = await api<Operation[]>(operationsUrl(PAGE_SIZE), {
-      signal: request.signal,
-    });
-    if (!listRequests.isCurrent(request)) return;
-    events.value = page;
-    hasMore.value = page.length === PAGE_SIZE;
-    if (selected.value) await loadDetail();
-  } catch (cause) {
-    if (listRequests.isCurrent(request)) error.value = errorMessage(cause);
-  } finally {
-    if (listRequests.isCurrent(request)) loadingMore.value = false;
-  }
-  await continueLoadingIfVisible();
-}
-
-async function loadMore() {
-  if (loadingMore.value || !hasMore.value) return;
-  const request = listRequests.begin();
-  const offset = events.value.length;
-  loadingMore.value = true;
-  try {
-    const page = await api<Operation[]>(operationsUrl(PAGE_SIZE, offset), {
-      signal: request.signal,
-    });
-    if (!listRequests.isCurrent(request)) return;
-    events.value.push(...page);
-    hasMore.value = page.length === PAGE_SIZE;
-  } catch (cause) {
-    if (listRequests.isCurrent(request)) error.value = errorMessage(cause);
-  } finally {
-    if (listRequests.isCurrent(request)) loadingMore.value = false;
-  }
-  await continueLoadingIfVisible();
-}
-
-async function refreshLoaded() {
-  const request = listRequests.begin();
-  loadingMore.value = true;
-  error.value = "";
-  const target = Math.max(events.value.length, PAGE_SIZE);
-  const refreshed: Operation[] = [];
-  let offset = 0;
-  try {
-    while (refreshed.length < target) {
-      const limit = Math.min(500, target - refreshed.length);
-      const page = await api<Operation[]>(operationsUrl(limit, offset), {
-        signal: request.signal,
-      });
-      if (!listRequests.isCurrent(request)) return;
-      refreshed.push(...page);
-      if (page.length < limit) break;
-      offset += page.length;
-    }
-    events.value = refreshed;
-    hasMore.value = refreshed.length >= target;
-    if (selected.value) await loadDetail();
-  } catch (cause) {
-    if (listRequests.isCurrent(request)) error.value = errorMessage(cause);
-  } finally {
-    if (listRequests.isCurrent(request)) loadingMore.value = false;
-  }
-  if (listRequests.isCurrent(request)) await continueLoadingIfVisible();
-}
 
 async function continueLoadingIfVisible() {
   await nextTick();
   const element = loadSentinel.value;
   if (!element || loadingMore.value || !hasMore.value) return;
-  if (element.getBoundingClientRect().top <= window.innerHeight + 240) {
-    void loadMore();
-  }
-}
-
-async function loadDetail() {
-  const request = detailRequests.begin();
-  const operationId = selected.value;
-  if (!operationId) {
-    detail.value = null;
-    return;
-  }
-  try {
-    const next = await api<Operation>(`/operations/${operationId}`, {
-      signal: request.signal,
-    });
-    if (detailRequests.isCurrent(request) && selected.value === operationId)
-      detail.value = next;
-  } catch (cause) {
-    if (detailRequests.isCurrent(request)) error.value = errorMessage(cause);
-  }
+  if (element.getBoundingClientRect().top <= window.innerHeight + 240)
+    void operations.loadMore();
 }
 
 function select(event: Operation) {
-  selected.value = event.operationId;
-  if (compact.value) {
-    void nextTick(() =>
-      layout.value?.scrollIntoView({ behavior: "smooth", block: "start" }),
-    );
-  }
+  operations.select(event);
+  focusDetail();
 }
 
 function backToOperations() {
-  selected.value = null;
-  detail.value = null;
+  const operationId = selected.value;
+  operations.clearSelection();
+  if (operationId)
+    focusMaster(`[data-operation-id="${CSS.escape(operationId)}"]`);
 }
 
 async function clearHistory() {
-  clearing.value = true;
-  error.value = "";
-  listRequests.invalidate();
-  detailRequests.invalidate();
-  loadingMore.value = false;
-  try {
-    await api("/operations", { method: "DELETE" });
-    selected.value = null;
-    detail.value = null;
-    clearDialog.value = false;
-    await loadInitial();
-  } catch (cause) {
-    error.value = errorMessage(cause);
-  } finally {
-    clearing.value = false;
-  }
+  if (await operations.clearHistory()) clearDialog.value = false;
 }
 </script>
 
@@ -205,7 +110,7 @@ async function clearHistory() {
               v-model="filter"
               mandatory
               variant="text"
-              class="operation-filters"
+              class="record-filters"
             >
               <v-btn value="all" size="small">{{
                 locale.t("$vuetify.chatroom.operations.all")
@@ -241,6 +146,15 @@ async function clearHistory() {
           :selected="selected"
           @select="select"
         />
+        <v-alert
+          v-if="limitReached"
+          type="info"
+          variant="tonal"
+          density="compact"
+          class="operation-window-limit"
+        >
+          {{ locale.t("$vuetify.chatroom.operations.windowLimit") }}
+        </v-alert>
         <div
           v-if="hasMore || loadingMore"
           ref="loadSentinel"
@@ -256,7 +170,12 @@ async function clearHistory() {
         </div>
       </v-card>
     </div>
-    <div v-if="!compact || selected" class="detail-pane">
+    <div
+      v-if="!compact || selected"
+      ref="detailPane"
+      class="detail-pane"
+      tabindex="-1"
+    >
       <v-alert
         v-if="compact && selected && error"
         type="error"
@@ -273,7 +192,7 @@ async function clearHistory() {
     </div>
   </div>
 
-  <v-dialog v-model="clearDialog" max-width="430">
+  <v-dialog v-model="clearDialog" width="auto" max-width="90vw">
     <v-card>
       <v-card-title>{{
         locale.t("$vuetify.chatroom.operations.clearTitle")
@@ -298,3 +217,228 @@ async function clearHistory() {
     </v-card>
   </v-dialog>
 </template>
+<style>
+.operations-header {
+  align-items: stretch;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.operations-controls {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.operations-clear {
+  flex: 0 0 auto;
+}
+
+.operations-clear.v-btn--disabled {
+  opacity: 0.46;
+}
+
+.responsive-record-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content max-content;
+  container-type: inline-size;
+}
+
+.operation-load-sentinel {
+  display: grid;
+  min-height: 42px;
+  place-items: center;
+  border-top: 1px solid rgb(var(--v-theme-outline), 0.06);
+  color: rgb(var(--v-theme-on-surface), 0.48);
+}
+
+.responsive-record-row {
+  display: grid;
+  content-visibility: auto;
+  contain-intrinsic-size: 48px;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  grid-template-areas: "main meta side";
+  width: 100%;
+  min-width: 0;
+  min-height: 48px;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 12px;
+  border: 0;
+  border-bottom: 1px solid rgb(var(--v-theme-outline), 0.08);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.responsive-record-row:last-child {
+  border-bottom: 0;
+}
+
+.responsive-record-row:hover,
+.responsive-record-row.selected-row {
+  background: rgb(var(--v-theme-primary), 0.045);
+}
+
+.responsive-record-main {
+  grid-area: main;
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.responsive-record-title,
+.responsive-record-subtitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.responsive-record-title {
+  flex: 0 0 auto;
+  max-width: 42%;
+  font-weight: 650;
+}
+
+.responsive-record-subtitle {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-top: 0;
+  color: rgb(var(--v-theme-on-surface), 0.52);
+  font-size: 12px;
+}
+
+.responsive-record-meta {
+  grid-area: meta;
+  display: flex;
+  min-width: 0;
+  flex-wrap: nowrap;
+  gap: 8px;
+  color: rgb(var(--v-theme-on-surface), 0.52);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.responsive-record-side {
+  grid-area: side;
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  justify-self: stretch;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+@container (max-width: 980px) {
+  .responsive-record-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .responsive-record-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "main side"
+      "meta side";
+    min-height: 0;
+    gap: 4px 8px;
+    padding: 8px 10px;
+  }
+
+  .responsive-record-meta {
+    overflow: hidden;
+  }
+}
+@container (max-width: 620px) {
+  .responsive-record-row {
+    gap: 3px 6px;
+    padding: 7px 9px;
+  }
+
+  .responsive-record-title {
+    max-width: 36%;
+  }
+
+  .responsive-record-meta {
+    gap: 6px;
+    font-size: 11px;
+  }
+}
+
+.operations-layout {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (max-width: 640px) {
+  .operations-controls {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+  }
+
+  .operations-clear.v-btn {
+    min-height: 34px;
+    padding-inline: 8px;
+  }
+}
+@media (max-width: 430px) {
+  .operations-controls {
+    gap: 5px;
+  }
+
+  .operations-clear.v-btn {
+    min-height: 32px;
+    padding-inline: 6px;
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 1100px) {
+  .operations-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.detail-tabs {
+  padding: 0 10px;
+}
+
+.detail-tabs .v-slide-group__container {
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: none;
+  touch-action: pan-x pan-y;
+}
+
+.detail-tabs .v-slide-group__container::-webkit-scrollbar {
+  display: none;
+}
+
+.detail-tabs .v-tab {
+  min-width: 0;
+  padding-inline: 12px;
+}
+
+@media (max-width: 1100px) {
+  .operations-layout .detail-pane {
+    position: static;
+  }
+}
+
+@media (max-width: 640px) {
+  .detail-tabs {
+    padding-inline: 4px;
+  }
+
+  .detail-tabs .v-tab {
+    padding-inline: 10px;
+  }
+}
+</style>

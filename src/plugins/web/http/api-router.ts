@@ -22,6 +22,7 @@ import {
 } from "./auth-api-router.js";
 import { createRuntimeApiRouter } from "./runtime-api-router.js";
 import { createLogsApiRouter } from "./logs-api-router.js";
+import { createAgentApiRouter } from "./agent-api-router.js";
 import type { LogService } from "#core/logging/types";
 
 export function createApiRouter(
@@ -50,6 +51,13 @@ export function createApiRouter(
       application.operations.list({
         limit: boundedIntegerQuery(req.query.limit, 100, 0, 500),
         offset: boundedIntegerQuery(req.query.offset, 0, 0, 100000),
+        ...(typeof req.query.beforeStartedAt === "string" &&
+        typeof req.query.beforeOperationId === "string"
+          ? {
+              beforeStartedAt: req.query.beforeStartedAt,
+              beforeOperationId: req.query.beforeOperationId,
+            }
+          : {}),
         ...(typeof req.query.pluginId === "string"
           ? { pluginId: req.query.pluginId }
           : {}),
@@ -72,6 +80,7 @@ export function createApiRouter(
   router.use(createWorkspaceApiRouter(application));
   router.use(createGitApiRouter(application));
   router.use(createProcessApiRouter(application));
+  router.use(createAgentApiRouter(application.agents));
   router.use(
     createComputerApiRouter(
       application.computer,

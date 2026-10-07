@@ -147,6 +147,7 @@ function displaySubtitle(display: ComputerStatus["displays"][number]): string {
           <template #append>
             <v-switch
               :model-value="status.settings.enabled"
+              :aria-label="locale.t('$vuetify.chatroom.computer.enabled')"
               :disabled="settingsBusy"
               @update:model-value="emit('updateSetting', 'enabled', !!$event)"
             />
@@ -158,6 +159,7 @@ function displaySubtitle(display: ComputerStatus["displays"][number]): string {
           <template #append>
             <v-switch
               :model-value="status.settings.remoteAccess"
+              :aria-label="locale.t('$vuetify.chatroom.computer.remoteAccess')"
               :disabled="settingsBusy"
               @update:model-value="
                 emit('updateSetting', 'remoteAccess', !!$event)
@@ -248,8 +250,7 @@ function displaySubtitle(display: ComputerStatus["displays"][number]): string {
 }
 
 .computer-permission-btn {
-  min-width: 64px;
-  height: 30px;
+  padding-inline: 10px;
   font-size: 12px;
   font-weight: 650;
 }

@@ -1,6 +1,6 @@
 {
   "name": "@zhanguym/chatroom",
-  "version": "1.0.0",
+  "version": "1.1.0-beta.0",
   "type": "module",
   "description": "Local MCP runtime for ChatGPT with workspace, process, Cloud, and WebUI controls.",
   "bin": {
@@ -42,15 +42,17 @@
   },
   "devDependencies": {
     "@mdi/js": "^7.4.47",
-    "@modelcontextprotocol/client": "^2.0.0",
     "@simplewebauthn/browser": "^13.3.0",
     "@types/compression": "^1.8.1",
     "@types/express": "^5.0.3",
+    "@types/markdown-it": "^14.2.0",
     "@types/node": "^24.2.1",
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-vue": "^6.0.8",
     "highlight.js": "^11.12.0",
+    "markdown-it": "^15.0.2",
     "prettier": "^3.9.6",
+    "simple-icons": "^15.22.0",
     "tsx": "^4.20.3",
     "typescript": "^5.9.2",
     "vite": "^7.1.2",

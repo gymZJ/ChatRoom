@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, shallowRef, watch } from "vue";
 import { useDisplay, useLocale } from "vuetify";
 import LoginView from "./components/LoginView.vue";
 import PasskeyManagerDialog from "./components/PasskeyManagerDialog.vue";
@@ -10,7 +10,7 @@ import { useRuntimeEvents } from "./composables/useRuntimeEvents.js";
 
 const locale = useLocale();
 const display = useDisplay();
-const drawer = ref(!display.smAndDown.value);
+const drawer = shallowRef(!display.smAndDown.value);
 const navigation = useAppNavigation();
 const runtimeState = useRuntimeEvents();
 const preferences = useAppPreferences();
@@ -23,13 +23,18 @@ const auth = useAuthSession({
   },
 });
 
-const { view, current, definitions: nav } = navigation;
+const { view, current, definitions: nav, prefetch } = navigation;
 const {
   runtime,
   updateStatus,
   processRevision,
+  processChanges,
   operationRevision,
+  operationChanges,
   computerRevision,
+  computerChanges,
+  agentRevision,
+  agentChanges,
   connectionState,
   latencyMs,
 } = runtimeState;
@@ -40,6 +45,7 @@ const {
   canUsePasskeys,
   passkeyRegistered,
   passkeyBusy,
+  loginBusy,
   passkeyDialog,
   passkeys,
   passkeyName,
@@ -59,14 +65,28 @@ const currentTitle = computed(() =>
   locale.t(`$vuetify.chatroom.${current.value.titleKey}`),
 );
 const currentComponent = computed(() => current.value.component);
-const currentProps = computed<Record<string, number>>(() => {
+const currentProps = computed<Record<string, unknown>>(() => {
   switch (view.value) {
     case "processes":
-      return { revision: processRevision.value };
+      return {
+        revision: processRevision.value,
+        changes: processChanges.value,
+      };
     case "operations":
-      return { revision: operationRevision.value };
+      return {
+        revision: operationRevision.value,
+        changes: operationChanges.value,
+      };
     case "computer":
-      return { revision: computerRevision.value };
+      return {
+        revision: computerRevision.value,
+        changes: computerChanges.value,
+      };
+    case "agents":
+      return {
+        revision: agentRevision.value,
+        changes: agentChanges.value,
+      };
     default:
       return {};
   }
@@ -88,6 +108,7 @@ watch(
 );
 
 function navigate(next: View) {
+  prefetch(next);
   navigation.navigate(next);
   if (display.smAndDown.value) drawer.value = false;
 }
@@ -104,12 +125,19 @@ function formatUptime(totalMinutes: number): string {
 </script>
 
 <template>
-  <v-app class="app-shell">
+  <v-app
+    class="app-shell"
+    :class="{
+      'app-shell--contained':
+        authenticated &&
+        (view === 'agents' ||
+          (view === 'processes' && display.width.value > 1100)),
+    }"
+  >
     <template v-if="authenticated">
       <v-navigation-drawer
         v-model="drawer"
         :temporary="display.smAndDown.value"
-        :width="display.smAndDown.value ? 272 : 220"
         class="app-drawer"
         border="e"
       >
@@ -122,6 +150,8 @@ function formatUptime(totalMinutes: number): string {
             :prepend-icon="item.icon"
             :title="locale.t(`$vuetify.chatroom.${item.titleKey}`)"
             rounded="lg"
+            @mouseenter="prefetch(item.id)"
+            @focus="prefetch(item.id)"
             @click="navigate(item.id)"
           />
         </v-list>
@@ -184,14 +214,19 @@ function formatUptime(totalMinutes: number): string {
                   :aria-label="locale.t('$vuetify.chatroom.common.language')"
                 />
               </template>
-              <v-list density="compact" min-width="160">
+              <v-list density="compact">
                 <v-list-item
-                  title="简体中文"
+                  :title="locale.t('$vuetify.chatroom.common.languages.zhHans')"
                   :active="locale.current.value === 'zhHans'"
                   @click="setLocale('zhHans')"
                 />
                 <v-list-item
-                  title="English"
+                  :title="locale.t('$vuetify.chatroom.common.languages.zhHant')"
+                  :active="locale.current.value === 'zhHant'"
+                  @click="setLocale('zhHant')"
+                />
+                <v-list-item
+                  :title="locale.t('$vuetify.chatroom.common.languages.en')"
                   :active="locale.current.value === 'en'"
                   @click="setLocale('en')"
                 />
@@ -208,7 +243,7 @@ function formatUptime(totalMinutes: number): string {
                   :aria-label="locale.t('$vuetify.chatroom.common.theme')"
                 />
               </template>
-              <v-list density="compact" min-width="170">
+              <v-list density="compact">
                 <v-list-item
                   prepend-icon="$mdiThemeLightDark"
                   :title="locale.t('$vuetify.chatroom.theme.system')"
@@ -241,7 +276,7 @@ function formatUptime(totalMinutes: number): string {
         </template>
       </v-navigation-drawer>
 
-      <v-app-bar flat class="app-bar" height="64">
+      <v-app-bar flat class="app-bar">
         <v-app-bar-nav-icon @click="drawer = !drawer" />
         <v-app-bar-title class="page-title">
           {{ currentTitle }}
@@ -284,6 +319,7 @@ function formatUptime(totalMinutes: number): string {
       :can-use-passkeys="canUsePasskeys"
       :passkey-registered="passkeyRegistered"
       :passkey-busy="passkeyBusy"
+      :login-busy="loginBusy"
       :login-error="loginError"
       :language-name="languageName"
       :theme-icon="themeIcon"

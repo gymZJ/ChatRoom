@@ -7,6 +7,7 @@ const files = await walk(src);
 const violations = [];
 const childProcessAllowed = new Set([
   "src/core/runtime/command-runner.ts",
+  "src/core/runtime/line-process.ts",
   "src/plugins/process/infrastructure/pipe-process-backend.ts",
   "src/plugins/computer/computer-native-host.ts",
 ]);
@@ -85,6 +86,18 @@ for (const file of files.filter((entry) => /\.(?:ts|tsx|vue)$/.test(entry))) {
   ) {
     violations.push(
       `${relative}: core depends on an adapter, plugin, protocol, or UI layer`,
+    );
+  }
+
+  if (
+    /^src\/app\/(?:[^/]+-access|service-registry)\.ts$/.test(relative) &&
+    /from\s+["'][^"']*(?:infrastructure|plugins|mcp|presentation|web)\//i.test(
+      content,
+    )
+  ) {
+    violations.push(
+      relative +
+        ": application capability contract depends on an implementation or adapter layer",
     );
   }
 

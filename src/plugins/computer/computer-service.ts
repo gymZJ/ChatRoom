@@ -21,6 +21,10 @@ export class ComputerService {
   private currentSnapshotId: string | null = null;
   private latestSnapshotValue: ComputerSnapshot | null = null;
   private latestSnapshotCapturedAt: string | null = null;
+  private readonly recentScreenshots = new Map<
+    string,
+    NonNullable<ComputerSnapshot["screenshot"]>
+  >();
   private queue: Promise<unknown> = Promise.resolve();
 
   constructor(
@@ -44,6 +48,16 @@ export class ComputerService {
     return this.latestSnapshotValue ? this.latestSnapshotCapturedAt : null;
   }
 
+  screenshot(
+    scope: ComputerAccessScope,
+    snapshotId: string,
+  ): NonNullable<ComputerSnapshot["screenshot"]> | null {
+    const settings = this.settings();
+    if (!settings.enabled) return null;
+    this.assertScopeAllowed(scope, settings);
+    return this.recentScreenshots.get(snapshotId) ?? null;
+  }
+
   requestPermission(permission: ComputerPermission): Promise<ComputerStatus> {
     return this.serial(async () => {
       const base = await this.backend.requestPermission(permission);
@@ -64,9 +78,10 @@ export class ComputerService {
       this.currentSnapshotId = null;
       this.latestSnapshotValue = null;
       this.latestSnapshotCapturedAt = null;
+      this.recentScreenshots.clear();
       void this.backend.dispose().catch(() => undefined);
     }
-    this.events.emit({ type: "computer-settings", settings: next });
+    this.events.emit({ type: "computer-settings" });
     return next;
   }
 
@@ -83,6 +98,11 @@ export class ComputerService {
       value.revision = this.revision;
       this.latestSnapshotValue = value;
       this.latestSnapshotCapturedAt = new Date().toISOString();
+      this.rememberScreenshot(value);
+      this.events.emit({
+        type: "computer-snapshot",
+        snapshotId: value.snapshotId,
+      });
       return value;
     });
   }
@@ -113,6 +133,11 @@ export class ComputerService {
       if (result.snapshot) {
         this.latestSnapshotValue = result.snapshot;
         this.latestSnapshotCapturedAt = new Date().toISOString();
+        this.rememberScreenshot(result.snapshot);
+        this.events.emit({
+          type: "computer-snapshot",
+          snapshotId: result.snapshot.snapshotId,
+        });
       }
       return result;
     });
@@ -122,7 +147,19 @@ export class ComputerService {
     this.currentSnapshotId = null;
     this.latestSnapshotValue = null;
     this.latestSnapshotCapturedAt = null;
+    this.recentScreenshots.clear();
     await this.backend.dispose();
+  }
+
+  private rememberScreenshot(snapshot: ComputerSnapshot): void {
+    if (!snapshot.screenshot) return;
+    this.recentScreenshots.delete(snapshot.snapshotId);
+    this.recentScreenshots.set(snapshot.snapshotId, snapshot.screenshot);
+    while (this.recentScreenshots.size > 2) {
+      const oldest = this.recentScreenshots.keys().next().value;
+      if (typeof oldest !== "string") break;
+      this.recentScreenshots.delete(oldest);
+    }
   }
 
   private assertActionBudget(request: ComputerActionRequest): void {

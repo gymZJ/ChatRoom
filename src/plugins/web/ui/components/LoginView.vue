@@ -6,6 +6,7 @@ defineProps<{
   canUsePasskeys: boolean;
   passkeyRegistered: boolean;
   passkeyBusy: boolean;
+  loginBusy: boolean;
   loginError: string;
   languageName: string;
   themeIcon: string;
@@ -36,8 +37,18 @@ const locale = useLocale();
           </v-btn>
         </template>
         <v-list density="compact">
-          <v-list-item title="简体中文" @click="emit('locale', 'zhHans')" />
-          <v-list-item title="English" @click="emit('locale', 'en')" />
+          <v-list-item
+            :title="locale.t('$vuetify.chatroom.common.languages.zhHans')"
+            @click="emit('locale', 'zhHans')"
+          />
+          <v-list-item
+            :title="locale.t('$vuetify.chatroom.common.languages.zhHant')"
+            @click="emit('locale', 'zhHant')"
+          />
+          <v-list-item
+            :title="locale.t('$vuetify.chatroom.common.languages.en')"
+            @click="emit('locale', 'en')"
+          />
         </v-list>
       </v-menu>
       <v-menu>
@@ -86,6 +97,7 @@ const locale = useLocale();
             variant="tonal"
             prepend-icon="$mdiFingerprint"
             :loading="passkeyBusy"
+            :disabled="loginBusy"
             @click="emit('passkeyLogin')"
           >
             {{ locale.t("$vuetify.chatroom.auth.signInWithPasskey") }}
@@ -125,7 +137,8 @@ const locale = useLocale();
           block
           size="large"
           class="mt-5"
-          :disabled="!token"
+          :disabled="!token.trim() || passkeyBusy"
+          :loading="loginBusy"
           @click="emit('login')"
         >
           {{ locale.t("$vuetify.chatroom.auth.signIn") }}

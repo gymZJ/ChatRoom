@@ -168,7 +168,6 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 <style scoped>
 .computer-operation-scroll {
-  max-height: min(280px, 36dvh);
   overflow-y: auto;
   overscroll-behavior: contain;
 }

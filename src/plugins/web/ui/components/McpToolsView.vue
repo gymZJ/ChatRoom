@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, shallowRef } from "vue";
 import { useLocale } from "vuetify";
 import { api, type McpToolSummary } from "../api.js";
 import { errorMessage } from "../utils/errors.js";
@@ -11,9 +11,9 @@ interface ToolGroup {
 }
 
 const locale = useLocale();
-const tools = ref<McpToolSummary[]>([]);
-const loading = ref(false);
-const error = ref("");
+const tools = shallowRef<McpToolSummary[]>([]);
+const loading = shallowRef(false);
+const error = shallowRef("");
 const busy = reactive(new Set<string>());
 const loadRequests = createRequestGate();
 
@@ -33,6 +33,7 @@ const groups = computed<ToolGroup[]>(() => {
 onMounted(() => void load());
 
 async function load() {
+  if (busy.size) return;
   const request = loadRequests.begin();
   loading.value = true;
   error.value = "";
@@ -50,6 +51,8 @@ async function load() {
 
 async function setEnabled(tool: McpToolSummary, enabled: boolean) {
   if (busy.has(tool.name) || tool.enabled === enabled) return;
+  loadRequests.invalidate();
+  loading.value = false;
   busy.add(tool.name);
   error.value = "";
   try {
@@ -60,8 +63,9 @@ async function setEnabled(tool: McpToolSummary, enabled: boolean) {
         body: JSON.stringify({ enabled }),
       },
     );
-    const index = tools.value.findIndex((item) => item.name === updated.name);
-    if (index >= 0) tools.value[index] = updated;
+    tools.value = tools.value.map((item) =>
+      item.name === updated.name ? updated : item,
+    );
   } catch (cause) {
     error.value = errorMessage(cause);
   } finally {
@@ -77,10 +81,46 @@ async function setGroupEnabled(group: ToolGroup, enabled: boolean) {
 }
 
 function pluginLabel(pluginId: string): string {
-  const known = ["workspace", "process", "computer"] as const;
+  const known = ["workspace", "process", "computer", "agent"] as const;
   if ((known as readonly string[]).includes(pluginId))
     return locale.t(`$vuetify.chatroom.mcpTools.plugins.${pluginId}`);
   return pluginId;
+}
+
+const localizedTools = new Set([
+  "workspace_list",
+  "workspace_info",
+  "process_start",
+  "process_read",
+  "process_write",
+  "process_kill",
+  "computer_snapshot",
+  "computer_action",
+  "agent_providers",
+  "agent_provider_details",
+  "agent_models",
+  "agent_sessions",
+  "agent_create",
+  "agent_send",
+  "agent_steer",
+  "agent_review",
+  "agent_history",
+  "agent_configure",
+  "agent_respond",
+  "agent_interrupt",
+  "agent_switch_provider",
+]);
+
+function toolTitle(tool: McpToolSummary): string {
+  return localizedTools.has(tool.name)
+    ? locale.t("$vuetify.chatroom.mcpTools.tools." + tool.name + ".title")
+    : tool.title;
+}
+
+function toolDescription(tool: McpToolSummary): string {
+  return localizedTools.has(tool.name)
+    ? locale.t("$vuetify.chatroom.mcpTools.tools." + tool.name + ".description")
+    : tool.description;
 }
 
 function someEnabled(group: ToolGroup): boolean {
@@ -111,6 +151,7 @@ function allEnabled(group: ToolGroup): boolean {
           size="small"
           variant="text"
           :loading="loading"
+          :disabled="busy.size > 0"
           :aria-label="locale.t('$vuetify.chatroom.mcpTools.refresh')"
           @click="load"
         />
@@ -150,9 +191,9 @@ function allEnabled(group: ToolGroup): boolean {
 
       <div class="mcp-tool-list">
         <div v-for="tool in group.tools" :key="tool.name" class="mcp-tool-row">
-          <div class="mcp-tool-copy" :title="tool.description">
+          <div class="mcp-tool-copy" :title="toolDescription(tool)">
             <div class="mcp-tool-heading">
-              <strong>{{ tool.title }}</strong>
+              <strong>{{ toolTitle(tool) }}</strong>
               <code>{{ tool.name }}</code>
             </div>
           </div>
@@ -164,7 +205,7 @@ function allEnabled(group: ToolGroup): boolean {
             hide-details
             inset
             :loading="busy.has(tool.name)"
-            :aria-label="tool.name"
+            :aria-label="toolTitle(tool)"
             @update:model-value="setEnabled(tool, Boolean($event))"
           />
         </div>
@@ -250,21 +291,16 @@ function allEnabled(group: ToolGroup): boolean {
 }
 
 .mcp-tool-switch {
-  width: 52px;
-  min-width: 52px;
-  max-width: 52px;
   justify-self: end;
 }
 
 .mcp-tool-switch :deep(.v-input__control),
 .mcp-tool-switch :deep(.v-selection-control) {
-  width: 52px;
-  min-width: 52px;
-  max-width: 52px;
+  inline-size: max-content;
 }
 
 .mcp-tool-switch :deep(.v-selection-control) {
-  flex: 0 0 52px;
+  flex: 0 0 auto;
 }
 
 @media (max-width: 640px) {

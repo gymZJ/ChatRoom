@@ -1,46 +1,44 @@
-import { mkdir, readdir, realpath, stat } from "node:fs/promises";
-import os from "node:os";
+import { mkdir, readdir, realpath } from "node:fs/promises";
 import path from "node:path";
+import type { GitAccess } from "#app/git-access";
+import type {
+  WorkspaceAccess,
+  WorkspaceEntry,
+  WorkspaceInfo,
+} from "#app/workspace-access";
 import { ChatRoomError } from "#core/errors/chatroom-error";
+import { WorkspaceRootPolicy } from "./workspace-root-policy.js";
 import {
   readInstructions,
   readPresetPrompt,
   readSkills,
   readSummary,
 } from "./metadata.js";
-import type { WorkspaceEntry, WorkspaceInfo } from "./types.js";
 import { WorkspaceFs } from "./workspace-fs.js";
 
-export class WorkspaceService {
-  private constructor(private readonly allowedRoots: string[]) {}
+export class WorkspaceService implements WorkspaceAccess {
+  private constructor(
+    private readonly rootsPolicy: WorkspaceRootPolicy,
+    private readonly git: Pick<GitAccess, "projectFiles">,
+  ) {}
 
-  static async create(allowedRoots: string[]): Promise<WorkspaceService> {
-    const canonicalRoots = await Promise.all(
-      allowedRoots.map(async (root) => {
-        const canonical = await realpath(expandHome(root)).catch(() => {
-          throw new ChatRoomError(
-            "NOT_FOUND",
-            `Allowed root does not exist: ${root}`,
-          );
-        });
-        if (!(await stat(canonical)).isDirectory())
-          throw new ChatRoomError(
-            "INVALID_INPUT",
-            `Allowed root is not a directory: ${root}`,
-          );
-        return canonical;
-      }),
+  static async create(
+    allowedRoots: string[],
+    git: Pick<GitAccess, "projectFiles">,
+  ): Promise<WorkspaceService> {
+    return new WorkspaceService(
+      await WorkspaceRootPolicy.create(allowedRoots),
+      git,
     );
-    return new WorkspaceService([...new Set(canonicalRoots)]);
   }
 
   roots(): string[] {
-    return [...this.allowedRoots];
+    return this.rootsPolicy.roots();
   }
 
   async list(): Promise<WorkspaceEntry[]> {
     const roots = new Set<string>();
-    for (const allowedRoot of this.allowedRoots) {
+    for (const allowedRoot of this.rootsPolicy.roots()) {
       let entries;
       try {
         entries = await readdir(allowedRoot, { withFileTypes: true });
@@ -57,7 +55,8 @@ export class WorkspaceService {
         const candidate = await realpath(
           path.join(allowedRoot, entry.name),
         ).catch(() => null);
-        if (candidate && this.isWorkspaceRoot(candidate)) roots.add(candidate);
+        if (candidate && this.rootsPolicy.isWorkspaceRoot(candidate))
+          roots.add(candidate);
       }
     }
 
@@ -76,33 +75,14 @@ export class WorkspaceService {
   }
 
   async resolve(input: string): Promise<string> {
-    if (typeof input !== "string" || !input.trim())
-      throw new ChatRoomError("INVALID_INPUT", "Workspace root is required");
-    const canonical = await realpath(expandHome(input)).catch(() => {
-      throw new ChatRoomError(
-        "NOT_FOUND",
-        `Workspace root does not exist: ${input}`,
-      );
-    });
-    if (!(await stat(canonical)).isDirectory())
-      throw new ChatRoomError(
-        "INVALID_INPUT",
-        `Workspace root is not a directory: ${input}`,
-      );
-    if (!this.isWorkspaceRoot(canonical))
-      throw new ChatRoomError(
-        "FORBIDDEN",
-        "Workspace must be a direct child of a configured allowed root",
-        { root: canonical },
-      );
-    return canonical;
+    return this.rootsPolicy.resolveWorkspace(input);
   }
 
   async createProject(
     parentInput: string,
     nameInput: string,
   ): Promise<WorkspaceEntry> {
-    const parent = await this.resolveAllowedRoot(parentInput);
+    const parent = await this.rootsPolicy.resolveAllowedRoot(parentInput);
     const name = validateProjectName(nameInput);
     const target = path.join(parent, name);
     try {
@@ -118,6 +98,37 @@ export class WorkspaceService {
     await mkdir(path.join(target, ".chatroom"));
     const root = await realpath(target);
     return { root, name: path.basename(root), summary: null };
+  }
+
+  async projectFiles(input: string, maxFiles = 5000): Promise<string[]> {
+    return (await this.projectFilesResult(input, maxFiles)).paths;
+  }
+
+  async projectFilesResult(
+    input: string,
+    maxFiles = 5000,
+  ): Promise<{ paths: string[]; truncated: boolean }> {
+    const fs = await this.fs(input);
+    const limit = Math.min(Math.max(Math.trunc(maxFiles), 1), 9999);
+    const gitFiles = await this.git.projectFiles(fs.root, limit + 1);
+    if (gitFiles)
+      return {
+        paths: gitFiles.slice(0, limit),
+        truncated: gitFiles.length > limit,
+      };
+
+    const entries = await fs.list(".", {
+      recursive: true,
+      maxEntries: 10_000,
+      excludeDirectoryNames: [".chatroom", ".git"],
+    });
+    const files = entries
+      .filter((entry) => entry.type === "file")
+      .map((entry) => entry.path);
+    return {
+      paths: files.slice(0, limit),
+      truncated: entries.length >= 10_000 || files.length > limit,
+    };
   }
 
   async info(input: string): Promise<WorkspaceInfo> {
@@ -142,27 +153,6 @@ export class WorkspaceService {
   async fs(input: string): Promise<WorkspaceFs> {
     return WorkspaceFs.create(await this.resolve(input));
   }
-
-  private isWorkspaceRoot(candidate: string): boolean {
-    return this.allowedRoots.some((root) => path.dirname(candidate) === root);
-  }
-
-  private async resolveAllowedRoot(input: string): Promise<string> {
-    if (typeof input !== "string" || !input.trim())
-      throw new ChatRoomError("INVALID_INPUT", "Allowed root is required");
-    const canonical = await realpath(expandHome(input)).catch(() => {
-      throw new ChatRoomError(
-        "NOT_FOUND",
-        `Allowed root does not exist: ${input}`,
-      );
-    });
-    if (!this.allowedRoots.includes(canonical))
-      throw new ChatRoomError(
-        "FORBIDDEN",
-        "Project can only be created directly under a configured allowed root",
-      );
-    return canonical;
-  }
 }
 
 function validateProjectName(input: string): string {
@@ -180,11 +170,4 @@ function validateProjectName(input: string): string {
   )
     throw new ChatRoomError("INVALID_INPUT", "Invalid project name");
   return name;
-}
-
-function expandHome(input: string): string {
-  if (input === "~") return os.homedir();
-  if (input.startsWith("~/") || input.startsWith("~\\"))
-    return path.join(os.homedir(), input.slice(2));
-  return path.resolve(input);
 }

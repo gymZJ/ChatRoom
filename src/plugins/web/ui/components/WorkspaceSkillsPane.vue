@@ -1,20 +1,23 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { shallowRef, watch } from "vue";
 import { useLocale } from "vuetify";
 import { api, type WorkspaceInfo, type WorkspaceSkill } from "../api.js";
 import { errorMessage } from "../utils/errors.js";
 import { createRequestGate } from "../utils/requests.js";
 
 const props = defineProps<{ root: string }>();
-const info = ref<WorkspaceInfo | null>(null);
-const loading = ref(false);
-const error = ref("");
+const info = shallowRef<WorkspaceInfo | null>(null);
+const loading = shallowRef(false);
+const error = shallowRef("");
 const locale = useLocale();
 const loadRequests = createRequestGate();
 
 watch(
   () => props.root,
-  () => void load(),
+  () => {
+    info.value = null;
+    void load();
+  },
   { immediate: true },
 );
 
@@ -38,9 +41,11 @@ async function load() {
 }
 
 function sourceLabel(skill: WorkspaceSkill): string {
-  if (skill.path.startsWith(".claude/skills/")) return "Claude";
-  if (skill.path.startsWith(".chatroom/skills/")) return "ChatRoom";
-  return "Agent";
+  if (skill.path.startsWith(".claude/skills/"))
+    return locale.t("$vuetify.chatroom.skills.sources.claude");
+  if (skill.path.startsWith(".chatroom/skills/"))
+    return locale.t("$vuetify.chatroom.skills.sources.chatRoom");
+  return locale.t("$vuetify.chatroom.skills.sources.agent");
 }
 </script>
 

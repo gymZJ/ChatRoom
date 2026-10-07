@@ -10,16 +10,20 @@ import { OperationLog } from "#operations/operation-log";
 import { AuthService } from "#auth/auth-service";
 import { PasskeyService } from "#auth/passkey-service";
 import { ExternalAccessRegistry } from "./external-access-registry.js";
-import { ServiceRegistry } from "#plugins/types";
+import { ServiceRegistry } from "#app/service-registry";
 import { PluginManager } from "#plugins/plugin-manager";
 import { createWorkspacePlugin } from "#plugins/workspace/plugin";
 import { createGitPlugin } from "#plugins/git/plugin";
-import { createProcessPlugin, ProcessService } from "#plugins/process/plugin";
-import { createCloudPlugin, CloudService } from "#plugins/cloud/plugin";
+import {
+  createProcessPlugin,
+  ProcessServiceToken,
+} from "#plugins/process/plugin";
+import { createCloudPlugin, CloudServiceToken } from "#plugins/cloud/plugin";
 import {
   createComputerPlugin,
   ComputerServiceToken,
 } from "#plugins/computer/plugin";
+import { createAgentPlugin } from "#plugins/agent/plugin";
 import { createWebPlugin, WebServiceToken } from "#plugins/web/plugin";
 import { createChatRoomMcpHandler } from "#mcp/server/create-mcp-server";
 import { McpToolControl } from "#mcp/server/tool-control";
@@ -31,7 +35,6 @@ export interface ApplicationComponents {
   eventBus: RuntimeEventBus;
   operations: OperationLog;
   plugins: PluginManager;
-  application: import("#plugins/web/runtime").WebRuntime;
   processes: import("#plugins/process/process-supervisor").ProcessSupervisor;
   cloud: import("#plugins/cloud/controller").CloudController;
   computer: import("#plugins/computer/computer-service").ComputerService;
@@ -75,18 +78,19 @@ export async function createApplication(
         logs,
       },
       [
-        createWorkspacePlugin(),
         createGitPlugin(),
+        createWorkspacePlugin(),
         createProcessPlugin(),
         createComputerPlugin(),
         createCloudPlugin(),
+        createAgentPlugin(),
         createWebPlugin(),
       ],
     );
     await plugins.start();
     const web = services.require(WebServiceToken);
-    const processes = services.require(ProcessService);
-    const cloud = services.require(CloudService);
+    const processes = services.require(ProcessServiceToken);
+    const cloud = services.require(CloudServiceToken);
     const computer = services.require(ComputerServiceToken);
     const mcp = createChatRoomMcpHandler(plugins);
     const http = new HttpServer(
@@ -105,7 +109,6 @@ export async function createApplication(
       eventBus,
       operations,
       plugins,
-      application: web.application,
       processes,
       cloud,
       computer,

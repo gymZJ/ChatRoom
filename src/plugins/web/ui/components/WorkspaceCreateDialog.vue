@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, watch, shallowRef } from "vue";
 import { useLocale } from "vuetify";
 
 const props = defineProps<{
@@ -9,8 +9,8 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ create: [parent: string, name: string] }>();
 const open = defineModel<boolean>({ required: true });
-const name = ref("");
-const parent = ref("");
+const name = shallowRef("");
+const parent = shallowRef("");
 const locale = useLocale();
 
 watch(
@@ -39,7 +39,7 @@ function submit() {
 </script>
 
 <template>
-  <v-dialog v-model="open" max-width="560">
+  <v-dialog v-model="open" width="auto" max-width="90vw">
     <v-card>
       <v-card-title class="d-flex align-center justify-space-between">
         <span>{{ locale.t("$vuetify.chatroom.workspaces.createTitle") }}</span>
@@ -101,3 +101,25 @@ function submit() {
     </v-card>
   </v-dialog>
 </template>
+
+<style scoped>
+.workspace-create-form {
+  display: grid;
+  gap: 18px;
+}
+
+.workspace-create-location {
+  display: grid;
+  gap: 4px;
+}
+
+.workspace-create-location span {
+  color: rgb(var(--v-theme-on-surface), 0.55);
+  font-size: 12px;
+}
+
+.workspace-create-location code {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+</style>

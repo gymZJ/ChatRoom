@@ -256,3 +256,19 @@
 .passkey-row-main {
   min-width: 0;
 }
+
+/* Conversation panes share the available viewport; only their content scrolls. */
+.app-shell--contained .v-application__wrap {
+  block-size: 100dvh;
+  min-block-size: 0;
+  overflow: hidden;
+}
+.app-shell--contained .v-main {
+  display: flex;
+  flex: 1 1 0;
+  min-block-size: 0;
+}
+.app-shell--contained .app-content {
+  display: flex;
+  min-block-size: 0;
+}

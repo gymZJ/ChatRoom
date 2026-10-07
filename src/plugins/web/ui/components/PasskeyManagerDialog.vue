@@ -10,7 +10,7 @@ const locale = useLocale();
 </script>
 
 <template>
-  <v-dialog v-model="open" max-width="560">
+  <v-dialog v-model="open" width="auto" max-width="90vw">
     <v-card class="passkey-dialog">
       <div class="panel-header">
         <div>

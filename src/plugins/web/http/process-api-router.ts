@@ -7,6 +7,13 @@ export function createProcessApiRouter(application: WebRuntime): Router {
   router.get("/processes", (_req, res) =>
     res.json(application.listProcesses()),
   );
+  router.get("/processes/:processId/summary", (req, res) => {
+    res.json(
+      application.getProcessSummary(
+        requireString(req.params.processId, "processId"),
+      ),
+    );
+  });
   router.get("/processes/:processId", (req, res) => {
     res.json(
       application.getProcess(requireString(req.params.processId, "processId")),

@@ -1,4 +1,10 @@
-import { computed, ref, watch, type WatchSource } from "vue";
+import {
+  computed,
+  onScopeDispose,
+  shallowRef,
+  watch,
+  type WatchSource,
+} from "vue";
 import {
   api,
   type GitBranch,
@@ -11,18 +17,28 @@ import { errorMessage } from "../utils/errors.js";
 import { createRequestGate } from "../utils/requests.js";
 
 export function useWorkspaceGit(root: WatchSource<string>) {
-  const status = ref<GitStatus | null>(null);
-  const branches = ref<GitBranch[]>([]);
-  const commits = ref<GitCommit[]>([]);
-  const selectedPath = ref<string | null>(null);
-  const diff = ref<GitDiff | null>(null);
-  const loading = ref(false);
-  const diffLoading = ref(false);
-  const busy = ref<string | null>(null);
-  const error = ref("");
+  const status = shallowRef<GitStatus | null>(null);
+  const branches = shallowRef<GitBranch[]>([]);
+  const commits = shallowRef<GitCommit[]>([]);
+  const selectedPath = shallowRef<string | null>(null);
+  const diff = shallowRef<GitDiff | null>(null);
+  const loading = shallowRef(false);
+  const diffLoading = shallowRef(false);
+  const busy = shallowRef<string | null>(null);
+  const error = shallowRef("");
   let generation = 0;
   const loadRequests = createRequestGate();
   const diffRequests = createRequestGate();
+  const mutationRequests = createRequestGate();
+  let disposed = false;
+
+  onScopeDispose(() => {
+    disposed = true;
+    generation += 1;
+    loadRequests.invalidate();
+    diffRequests.invalidate();
+    mutationRequests.invalidate();
+  });
 
   const currentRoot = () =>
     typeof root === "function" ? root() : String(root.value ?? "");
@@ -45,16 +61,19 @@ export function useWorkspaceGit(root: WatchSource<string>) {
       generation += 1;
       loadRequests.invalidate();
       diffRequests.invalidate();
+      mutationRequests.invalidate();
       busy.value = null;
+      status.value = null;
+      branches.value = [];
+      commits.value = [];
       selectedPath.value = null;
       diff.value = null;
       void load();
     },
     { immediate: true },
   );
-  watch(selectedPath, () => void loadDiff());
-
   async function load() {
+    if (disposed || busy.value) return;
     const generationAtStart = ++generation;
     const request = loadRequests.begin();
     const targetRoot = currentRoot();
@@ -122,6 +141,13 @@ export function useWorkspaceGit(root: WatchSource<string>) {
     commits.value = nextCommits;
   }
 
+  function selectPath(path: string | null) {
+    if (selectedPath.value === path) return;
+    selectedPath.value = path;
+    diff.value = null;
+    void loadDiff();
+  }
+
   async function loadDiff() {
     const path = selectedPath.value;
     const targetRoot = currentRoot();
@@ -162,9 +188,10 @@ export function useWorkspaceGit(root: WatchSource<string>) {
     body: Record<string, unknown>,
     timeoutMs = 60_000,
   ): Promise<boolean> {
-    if (busy.value) return false;
+    if (disposed || busy.value) return false;
     const targetRoot = currentRoot();
-    const request = ++generation;
+    const generationAtStart = ++generation;
+    const mutation = mutationRequests.begin();
     loadRequests.invalidate();
     diffRequests.invalidate();
     loading.value = false;
@@ -176,20 +203,43 @@ export function useWorkspaceGit(root: WatchSource<string>) {
         method,
         body: JSON.stringify({ root: targetRoot, ...body }),
         timeoutMs,
+        signal: mutation.signal,
       });
-      if (request !== generation || currentRoot() !== targetRoot) return false;
+      if (
+        disposed ||
+        generationAtStart !== generation ||
+        !mutationRequests.isCurrent(mutation) ||
+        currentRoot() !== targetRoot
+      )
+        return false;
       status.value = next;
       normalizeSelection();
-      await loadAncillary(request, targetRoot);
-      if (request !== generation || currentRoot() !== targetRoot) return false;
+      await loadAncillary(generationAtStart, targetRoot, mutation.signal);
+      if (
+        disposed ||
+        generationAtStart !== generation ||
+        !mutationRequests.isCurrent(mutation) ||
+        currentRoot() !== targetRoot
+      )
+        return false;
       await loadDiff();
       return true;
     } catch (cause) {
-      if (request === generation && currentRoot() === targetRoot)
+      if (
+        !disposed &&
+        generationAtStart === generation &&
+        mutationRequests.isCurrent(mutation) &&
+        currentRoot() === targetRoot
+      )
         error.value = errorMessage(cause);
       return false;
     } finally {
-      if (request === generation && currentRoot() === targetRoot)
+      if (
+        !disposed &&
+        generationAtStart === generation &&
+        mutationRequests.isCurrent(mutation) &&
+        currentRoot() === targetRoot
+      )
         busy.value = null;
     }
   }
@@ -240,6 +290,7 @@ export function useWorkspaceGit(root: WatchSource<string>) {
     branches,
     commits,
     selectedPath,
+    selectPath,
     diff,
     loading,
     diffLoading,

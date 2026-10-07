@@ -1,4 +1,4 @@
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, shallowRef } from "vue";
 import { useLocale, useTheme } from "vuetify";
 import type { AppLocale } from "../locales.js";
 
@@ -7,7 +7,7 @@ type ThemeMode = "system" | "light" | "dark";
 export function useAppPreferences() {
   const theme = useTheme();
   const locale = useLocale();
-  const themeMode = ref<ThemeMode>(readThemeMode());
+  const themeMode = shallowRef<ThemeMode>(readThemeMode());
   let colorScheme: MediaQueryList | null = null;
 
   const themeIcon = computed(() => {
@@ -15,7 +15,7 @@ export function useAppPreferences() {
     return themeMode.value === "dark" ? "$mdiWeatherNight" : "$mdiWeatherSunny";
   });
   const languageName = computed(() =>
-    locale.current.value === "zhHans" ? "简体中文" : "English",
+    locale.t("$vuetify.chatroom.common.languages." + locale.current.value),
   );
 
   onMounted(() => {
@@ -57,5 +57,6 @@ function readThemeMode(): ThemeMode {
 }
 
 function applyLocale(locale: AppLocale) {
-  document.documentElement.lang = locale === "zhHans" ? "zh-CN" : "en-US";
+  document.documentElement.lang =
+    locale === "zhHans" ? "zh-CN" : locale === "zhHant" ? "zh-TW" : "en-US";
 }

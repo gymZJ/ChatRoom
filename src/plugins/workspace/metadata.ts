@@ -1,7 +1,7 @@
 import path from "node:path";
 import { ChatRoomError } from "#core/errors/chatroom-error";
 import type { WorkspaceFs } from "./workspace-fs.js";
-import type { WorkspaceSkill } from "./types.js";
+import type { WorkspaceSkill } from "#app/workspace-access";
 
 const SKILL_ROOTS = [".agents/skills", ".claude/skills", ".chatroom/skills"];
 const MAX_METADATA_BYTES = 64 * 1024;

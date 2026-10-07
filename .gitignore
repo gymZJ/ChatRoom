@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .chatroom/
+.agents/
 coverage/
 *.log
 .DS_Store

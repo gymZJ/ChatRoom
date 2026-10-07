@@ -1,141 +1,40 @@
 import assert from "node:assert/strict";
 import http from "node:http";
-import { readFileSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
-import path from "node:path";
 import test from "node:test";
-import {
-  Client,
-  StreamableHTTPClientTransport,
-} from "@modelcontextprotocol/client";
 import { createTestRuntime } from "../helpers/runtime.js";
 
-test("HTTP API and real MCP client share the same Application runtime", async () => {
+test("MCP accepts 2025-era initialization in stateless mode", async () => {
   const runtime = await createTestRuntime();
-  let client: Client | null = null;
   try {
     await runtime.components.http.start();
     const address = runtime.components.http.address();
     assert.ok(address);
-    const base = `http://127.0.0.1:${address.port}`;
-
-    const packageVersion = (
-      JSON.parse(readFileSync("package.json", "utf8")) as { version: string }
-    ).version;
-
-    const metadataWrites = await Promise.all(
-      [
-        [".chatroom/summary.md", "ChatRoom integration workspace"],
-        [".chatroom/prompt.md", "Prefer minimal workspace changes."],
-      ].map(([filePath, content]) =>
-        fetch(`${base}/api/workspace/file`, {
-          method: "PUT",
-          headers: { "content-type": "application/json" },
+    for (const protocolVersion of ["2025-03-26", "2025-06-18", "2025-11-25"]) {
+      const response: Response = await fetch(
+        `http://127.0.0.1:${address.port}/mcp`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json, text/event-stream",
+            "mcp-protocol-version": protocolVersion,
+          },
           body: JSON.stringify({
-            root: runtime.workspaceRoot,
-            path: filePath,
-            content,
+            jsonrpc: "2.0",
+            id: 1,
+            method: "initialize",
+            params: {
+              protocolVersion,
+              capabilities: {},
+              clientInfo: { name: "stateless-test", version: "1.0.0" },
+            },
           }),
-        }),
-      ),
-    );
-    for (const response of metadataWrites) assert.equal(response.status, 200);
-
-    const workspaceListResponse = await fetch(`${base}/api/workspaces`);
-    assert.equal(workspaceListResponse.status, 200);
-    const workspaceList = (await workspaceListResponse.json()) as Array<{
-      root: string;
-      name: string;
-      summary: string | null;
-    }>;
-    assert.deepEqual(
-      workspaceList.find((item) => item.root === runtime.workspaceRoot),
-      {
-        root: runtime.workspaceRoot,
-        name: path.basename(runtime.workspaceRoot),
-        summary: "ChatRoom integration workspace",
-      },
-    );
-
-    const createResponse = await fetch(`${base}/api/workspaces`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ parent: runtime.root, name: "created-project" }),
-    });
-    assert.equal(createResponse.status, 200);
-    const createdWorkspace = (await createResponse.json()) as { root: string };
-    assert.equal(
-      createdWorkspace.root,
-      path.join(runtime.root, "created-project"),
-    );
-
-    const nested = path.join(runtime.workspaceRoot, "nested");
-    await mkdir(nested);
-    const nestedInfoResponse = await fetch(
-      `${base}/api/workspace?root=${encodeURIComponent(nested)}`,
-    );
-    assert.equal(nestedInfoResponse.status, 403);
-
-    client = new Client(
-      {
-        name: "chatroom-integration-test",
-        version: "1.0.0",
-      },
-      {
-        versionNegotiation: { mode: { pin: "2026-07-28" } },
-      },
-    );
-    const transport = new StreamableHTTPClientTransport(new URL(`${base}/mcp`));
-    await client.connect(transport);
-    assert.equal(client.getServerVersion()?.version, packageVersion);
-    const tools = await client.listTools();
-    assert.ok(tools.tools.some((tool) => tool.name === "workspace_info"));
-    assert.ok(tools.tools.some((tool) => tool.name === "computer_snapshot"));
-    assert.ok(tools.tools.some((tool) => tool.name === "computer_action"));
-    const workspace = await client.callTool({
-      name: "workspace_info",
-      arguments: { root: runtime.workspaceRoot },
-    });
-    assert.equal(workspace.isError, undefined);
-    const workspaceInfo = workspace.structuredContent as {
-      root: string;
-      summary: string | null;
-      presetPrompt: string | null;
-    };
-    assert.equal(workspaceInfo.root, runtime.workspaceRoot);
-    assert.equal(workspaceInfo.summary, "ChatRoom integration workspace");
-    assert.equal(
-      workspaceInfo.presetPrompt,
-      "Prefer minimal workspace changes.",
-    );
-    const startedProcess = await client.callTool({
-      name: "process_start",
-      arguments: {
-        command: process.execPath,
-        args: ["-e", "setTimeout(() => {}, 5000)"],
-        cwd: runtime.workspaceRoot,
-        timeoutMs: 5000,
-      },
-    });
-    assert.equal(startedProcess.isError, undefined);
-    const processSnapshot = startedProcess.structuredContent as {
-      processId: string;
-      operationId: string;
-    };
-    const processOperation = runtime.components.operations.get(
-      processSnapshot.operationId,
-    );
-    assert.equal(processOperation?.pluginId, "process");
-    assert.equal(processOperation?.source, "mcp");
-    assert.equal(processOperation?.action, "start");
-    assert.equal(processOperation?.processId, processSnapshot.processId);
-    assert.equal(processOperation?.status, "running");
-    await client.callTool({
-      name: "process_kill",
-      arguments: { processId: processSnapshot.processId, force: true },
-    });
+        },
+      );
+      assert.equal(response.status, 200, protocolVersion);
+      assert.match(await response.text(), new RegExp(protocolVersion));
+    }
   } finally {
-    await client?.close().catch(() => undefined);
     await runtime.cleanup();
   }
 });

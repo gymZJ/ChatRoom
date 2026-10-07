@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue";
+import { computed, onBeforeUnmount, shallowRef, watch } from "vue";
 import { useLocale } from "vuetify";
 
 const HIGHLIGHT_MAX_CHARS = 200_000;
@@ -12,17 +12,20 @@ const props = withDefaults(
     filename?: string;
     language?: string;
     toolbar?: boolean;
+    highlight?: boolean;
   }>(),
   {
     filename: "chatroom-output.txt",
     toolbar: true,
+    highlight: true,
   },
 );
-const query = ref("");
-const effectiveQuery = ref("");
-const wrap = ref(true);
+const query = shallowRef("");
+const effectiveQuery = shallowRef("");
+const wrap = shallowRef(true);
 const highlighted = shallowRef<string | null>(null);
 const locale = useLocale();
+const copyError = shallowRef("");
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
 let highlightGeneration = 0;
 
@@ -52,20 +55,29 @@ watch(
     () => props.filename,
     () => props.language,
     () => props.value !== undefined,
+    () => props.highlight,
   ],
-  async () => {
+  async (_values, _previous, onCleanup) => {
     const generation = ++highlightGeneration;
+    onCleanup(() => {
+      highlightGeneration += 1;
+    });
+    highlighted.value = null;
     const text = display.value;
-    if (!text || text.length > HIGHLIGHT_MAX_CHARS) {
-      highlighted.value = null;
+    if (!props.highlight || !text || text.length > HIGHLIGHT_MAX_CHARS) {
       return;
     }
-    const { highlightSource } = await import("../syntax-highlight.js");
-    if (generation !== highlightGeneration) return;
-    highlighted.value = highlightSource(text, {
+    const options = {
       filename: props.filename,
       language: props.language ?? (props.value !== undefined ? "json" : null),
-    });
+    };
+    try {
+      const { highlightSource } = await import("../syntax-highlight.js");
+      if (generation !== highlightGeneration) return;
+      highlighted.value = highlightSource(text, options);
+    } catch {
+      // Keep the current plain text if the optional highlighter cannot load.
+    }
   },
   { immediate: true },
 );
@@ -76,7 +88,12 @@ onBeforeUnmount(() => {
 });
 
 async function copy() {
-  await navigator.clipboard.writeText(source.value);
+  copyError.value = "";
+  try {
+    await navigator.clipboard.writeText(source.value);
+  } catch {
+    copyError.value = locale.t("$vuetify.chatroom.code.copyFailed");
+  }
 }
 function download() {
   const url = URL.createObjectURL(
@@ -103,6 +120,7 @@ function download() {
         <v-text-field
           v-model="query"
           :placeholder="locale.t('$vuetify.chatroom.code.search')"
+          :aria-label="locale.t('$vuetify.chatroom.code.search')"
           prepend-inner-icon="$mdiMagnify"
           density="compact"
           hide-details
@@ -141,6 +159,9 @@ function download() {
       </div>
       <v-divider />
     </template>
+    <div v-if="copyError" class="code-copy-error" role="alert">
+      {{ copyError }}
+    </div>
     <pre class="code-block" :class="{ wrap }"><code
       v-if="highlighted"
       class="hljs"

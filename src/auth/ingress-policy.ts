@@ -30,7 +30,7 @@ export class IngressPolicy {
   }
 
   requiresWebAuth(req: Request): boolean {
-    if (this.isExternalWeb(req)) return true;
+    if (this.isRemoteWeb(req)) return true;
     return this.config.auth.localWebAuth;
   }
 
@@ -38,12 +38,20 @@ export class IngressPolicy {
     return this.externalAccess.matches("web", req.hostname);
   }
 
+  isRemoteWeb(req: Request): boolean {
+    return this.externalAccess.hasHost(req.hostname) || !isLoopbackPeer(req);
+  }
+
   requiresMcpAuth(req: Request): boolean {
-    return this.isExternalMcp(req);
+    return this.isRemoteMcp(req);
   }
 
   isExternalMcp(req: Request): boolean {
     return this.externalAccess.matches("mcp", req.hostname);
+  }
+
+  isRemoteMcp(req: Request): boolean {
+    return this.externalAccess.hasHost(req.hostname) || !isLoopbackPeer(req);
   }
 
   secureWebCookie(req: Request): boolean {
@@ -84,4 +92,13 @@ export class IngressPolicy {
   ): string | null {
     return this.externalAccess.baseUrlForHost(kind, req.hostname);
   }
+}
+
+function isLoopbackPeer(req: Request): boolean {
+  const address = req.socket.remoteAddress;
+  return (
+    address === "::1" ||
+    address?.startsWith("127.") === true ||
+    address?.startsWith("::ffff:127.") === true
+  );
 }

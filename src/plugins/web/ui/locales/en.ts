@@ -3,13 +3,14 @@ export const enChatRoom = {
     operations: "Operations",
     systemLogs: "System Logs",
     workspaces: "Workspaces",
+    agents: "Agent",
     processes: "Processes",
-    computer: "Computer",
+    computer: "Computer Use",
     mcpTools: "MCP Tools",
     cloud: "Cloud",
   },
   mcpTools: {
-    title: "MCP tool access",
+    title: "MCP Tool Access",
     refresh: "Refresh tools",
     togglePlugin: "Toggle all {0} tools",
     empty: "No MCP tools are registered.",
@@ -17,6 +18,296 @@ export const enChatRoom = {
       workspace: "Workspace",
       process: "Process",
       computer: "Computer Use",
+      agent: "Agent",
+    },
+    tools: {
+      workspace_list: {
+        title: "List workspaces",
+        description:
+          "List available projects with their workspace paths, names, and project summaries.",
+      },
+      workspace_info: {
+        title: "Workspace info",
+        description:
+          "Read complete workspace context, including the project summary, preset prompt, project instructions, and Skill metadata.",
+      },
+      process_start: {
+        title: "Start process",
+        description:
+          "Start a supervised process and return its ProcessId immediately.",
+      },
+      process_read: {
+        title: "Read process",
+        description:
+          "Read bounded stdout/stderr output and the current process state.",
+      },
+      process_write: {
+        title: "Write process input",
+        description: "Write data to the standard input of a running process.",
+      },
+      process_kill: {
+        title: "Stop process",
+        description: "Terminate or force-kill a supervised process.",
+      },
+      computer_snapshot: {
+        title: "Observe computer",
+        description:
+          "Capture the current desktop and compact accessibility information.",
+      },
+      computer_action: {
+        title: "Control computer",
+        description:
+          "Execute a bounded batch of semantic or coordinate desktop actions.",
+      },
+      agent_providers: {
+        title: "List Agent providers",
+        description:
+          "View registered Agent provider availability, authentication state, versions, and capabilities.",
+      },
+      agent_provider_details: {
+        title: "Agent provider details",
+        description:
+          "Read Agent provider configuration requirements and rate-limit information.",
+      },
+      agent_models: {
+        title: "List Agent models",
+        description:
+          "List provider models with reasoning efforts, input modalities, service tiers, and defaults.",
+      },
+      agent_sessions: {
+        title: "List Agent sessions",
+        description: "List Agent sessions shared by MCP and the Web UI.",
+      },
+      agent_create: {
+        title: "Create Agent session",
+        description:
+          "Create an Agent session for a ChatRoom workspace using a registered provider.",
+      },
+      agent_send: {
+        title: "Send Agent instruction",
+        description:
+          "Send an instruction to an existing Agent session and start a new turn.",
+      },
+      agent_steer: {
+        title: "Steer active Agent turn",
+        description:
+          "Send follow-up text or attachments to the active Agent turn.",
+      },
+      agent_review: {
+        title: "Start Agent review",
+        description: "Start a code review in the existing Agent conversation.",
+      },
+      agent_history: {
+        title: "Read Agent history",
+        description:
+          "Read Agent history, tool activity, file changes, plans, and pending interactions.",
+      },
+      agent_configure: {
+        title: "Configure Agent session",
+        description:
+          "Update the Agent session model, reasoning settings, service tier, and provider-native permission settings.",
+      },
+      agent_respond: {
+        title: "Respond to Agent interaction",
+        description:
+          "Respond to a pending Agent approval or structured input request.",
+      },
+      agent_interrupt: {
+        title: "Interrupt Agent",
+        description: "Interrupt the active turn of an Agent session.",
+      },
+      agent_switch_provider: {
+        title: "Switch Agent provider",
+        description:
+          "Switch provider in the same Agent conversation while preserving visible history.",
+      },
+    },
+  },
+  agents: {
+    showOlderTurns: "Show {0} older turns",
+    title: "Agent",
+    deleteTitle: "Delete Agent session",
+    deleteDescription:
+      "This removes the ChatRoom-local session history. Provider-side history is not rewritten.",
+    waitingApproval: "Waiting for approval",
+    waitingAnswer: "Waiting for answer",
+    selectSession: "Select an Agent session.",
+    newSession: "New session",
+    workspace: "Workspace",
+    provider: "Provider",
+    model: "Model",
+    modelSettings: "Session settings",
+    sessionControls: "Session controls",
+    status: "Status",
+    defaultModel: "Default",
+    reasoningEffort: "Reasoning effort",
+    reasoningSummary: "Reasoning summary",
+    serviceTier: "Speed / service tier",
+    approvalPolicy: "Approval policy",
+    approvalsReviewer: "Approvals reviewer",
+    permissionMode: "Permission mode",
+    approvalChoices: {
+      accept: "Allow once",
+      session: "Allow for session",
+      deny: "Deny",
+      cancel: "Cancel turn",
+      similar: "Allow similar commands",
+    },
+    moreApprovalOptions: "More approval options",
+    interactionResolved: "Resolved",
+    compaction: {
+      running: "Compacting conversation context…",
+      completed: "Conversation context compacted",
+      failed: "Context compaction did not complete",
+    },
+    fullAccessConfirm:
+      "Full Access lets the Agent execute commands and access files and the network beyond this workspace without routine permission prompts. Enable only for a trusted task. Enable Full Access?",
+    nativeOptions: {
+      untrusted: {
+        title: "Ask for untrusted commands",
+        description: "Ask before commands outside the trusted set.",
+      },
+      onRequest: {
+        title: "Ask when needed",
+        description:
+          "The Agent requests approval when an operation needs escalation.",
+      },
+      granular: {
+        title: "Custom approval categories",
+        description:
+          "Choose which native approval categories can request confirmation.",
+      },
+      never: {
+        title: "No approval prompts",
+        description:
+          "Run allowed operations automatically; the sandbox still applies and blocked operations fail.",
+      },
+      user: {
+        title: "Manual approval",
+        description: "Send approval requests to you.",
+      },
+      autoReview: {
+        title: "Automatic approval review",
+        description:
+          "The provider reviews requests and approves or denies them based on risk, without individual approval prompts.",
+      },
+      readOnly: {
+        title: "Read-only sandbox",
+        description:
+          "Read files; writes need approval under the chosen approval policy.",
+      },
+      workspaceWrite: {
+        title: "Workspace sandbox",
+        description:
+          "Allow workspace writes. Outside access stays restricted by the native sandbox.",
+      },
+      fullAccessCodex: {
+        title: "Full Access",
+        description:
+          "Disable the sandbox. Selecting this also disables routine approval prompts.",
+      },
+    },
+    granularApprovals: "Granular approvals",
+    steer: "Steer",
+    steerHint: "Send a follow-up to the running turn",
+    steerPlaceholder: "Guide the running turn…",
+    review: "Review",
+    reviewTarget: "Review target",
+    startReview: "Start review",
+    reviewCommitTitle: "Commit title (optional)",
+    reviewTargets: {
+      uncommittedChanges: "Uncommitted changes",
+      baseBranch: "Compare with branch",
+      commit: "Commit",
+      custom: "Custom instructions",
+    },
+    reviewFields: {
+      baseBranch: "Base branch",
+      commit: "Commit SHA",
+      custom: "Instructions",
+    },
+    resolvedExternally: "Resolved externally.",
+    turnDiff: "Turn diff",
+    managedRequirementsAvailable:
+      "Managed configuration requirements available",
+    rateLimitsAvailable: "Rate-limit information available",
+    quotaFiveHour: "5 hours",
+    quotaSevenDay: "7 days",
+    quotaOauthApps: "OAuth apps · 7 days",
+    quotaOpus: "Opus · 7 days",
+    quotaSonnet: "Sonnet · 7 days",
+    quotaPercent: "{0}% used",
+    quotaResetsIn: "resets in {0}",
+    quotaResetSoon: "resetting",
+    quotaExtraUsage: "Extra usage",
+    quotaUnavailable:
+      "Subscription quota is not available for this login/provider.",
+    tokenUsage: "{0} tokens total",
+    contextUsage: "Context {0} / {1} ({2}%)",
+    unsupportedAttachment:
+      "This model does not support the selected media: {0}",
+    webSearch: "Web search",
+    imageGeneration: "Image generation",
+    summaries: {
+      auto: "Auto",
+      concise: "Concise",
+      detailed: "Detailed",
+      none: "None",
+    },
+    planStatuses: {
+      pending: "Pending",
+      inProgress: "In progress",
+      completed: "Completed",
+    },
+    create: "Create",
+    loading: "Loading…",
+    noSessions: "No Agent sessions yet.",
+    noHistory: "No conversation yet.",
+    backToLatest: "Back to latest",
+    backToSessions: "Back to Agent sessions",
+    stop: "Stop",
+    switchAgent: "Switch",
+    refresh: "Refresh",
+    delete: "Delete session",
+    submit: "Submit",
+    send: "Send",
+    messagePlaceholder: "Send an instruction…",
+    attachFile: "Add local attachment",
+    projectFiles: "Reference workspace",
+    projectFilesTruncated:
+      "Only the first 5,000 project files are indexed. Narrow the workspace if you need files beyond this limit.",
+    searchFiles: "Search workspace files",
+    noMatchingFiles: "No matching workspace files.",
+    providerUnavailable: "Not installed",
+    providerNotAuthenticated: "Not authenticated",
+    providerAvailable: "Available",
+    command: "Command",
+    commandOutput: "Output",
+    commandDetails: "Command details",
+    commandRunning: "Running",
+    commandSucceeded: "Completed",
+    commandFailed: "Failed",
+    exitCode: "Exit {0}",
+    generatedImage: "Generated image",
+    generatedImages: "{0} generated images",
+    imageLoading: "Loading image…",
+    imageLoadFailed: "Image failed to load",
+    imageDecodeFailed: "Invalid image data. Retry loading.",
+    retry: "Retry",
+    fileChanges: "File changes",
+    plan: "Plan",
+    artifact: "Artifact",
+    sources: {
+      human: "Human",
+      mcp: "MCP",
+    },
+    statuses: {
+      idle: "Idle",
+      running: "Running",
+      waiting_input: "Waiting for input",
+      error: "Error",
+      failed: "Turn failed",
+      interrupted: "Turn interrupted",
     },
   },
   computer: {
@@ -26,7 +317,6 @@ export const enChatRoom = {
     access: "Access",
     enabled: "Computer Use",
     remoteAccess: "Allow remote access",
-    testSnapshot: "Test snapshot",
     displays: "Displays",
     primaryDisplay: "Primary",
     latestScreen: "Screen",
@@ -62,7 +352,7 @@ export const enChatRoom = {
       "not-required": "Not required",
     },
     permissionLocalOnly:
-      "System permissions can only be requested from the local WebUI on this computer. Remote requests are disabled.",
+      "System permissions can only be requested from the local Web UI on this computer. Remote requests are disabled.",
     log: {
       snapshot: "Observed the screen",
       settings: "Changed Computer Use settings",
@@ -99,14 +389,14 @@ export const enChatRoom = {
     installationId: "Installation ID",
     remoteMcp: "Remote MCP",
     remoteMcpDescription: "Expose MCP through ChatRoom Cloud.",
-    remoteWeb: "Remote WebUI",
-    remoteWebDescription: "Expose the ChatRoom WebUI through ChatRoom Cloud.",
+    remoteWeb: "Remote Web UI",
+    remoteWebDescription: "Expose the ChatRoom Web UI through ChatRoom Cloud.",
     disableMcpTitle: "Disable remote MCP?",
     disableMcpDescription:
       "Remote MCP access will stop until you enable it again from this page.",
-    disableWebTitle: "Disable remote WebUI?",
+    disableWebTitle: "Disable remote Web UI?",
     disableWebDescription:
-      "The current remote WebUI address will stop working immediately. You will not be able to use that address to return here and re-enable remote access; use the local WebUI instead.",
+      "The current remote Web UI address will stop working immediately. You will not be able to use that address to return here and re-enable remote access; use the local Web UI instead.",
     disableConfirm: "Disable",
     connection: {
       inactive: "Inactive",
@@ -125,6 +415,11 @@ export const enChatRoom = {
     uptimeHoursMinutes: "{0} h {1} min",
   },
   common: {
+    imageLoadFailed: "Could not load the image.",
+    loading: "Loading page…",
+    pageLoadFailed: "Could not load this page. Reload to try again.",
+    reload: "Reload page",
+
     connection: {
       connecting: "Connecting",
       connected: "Connected",
@@ -133,8 +428,15 @@ export const enChatRoom = {
     },
     signOut: "Sign out",
     language: "Language",
+    languages: {
+      zhHans: "简体中文",
+      zhHant: "繁體中文",
+      en: "English",
+    },
     theme: "Theme",
     cancel: "Cancel",
+    confirm: "Confirm",
+    save: "Save",
     close: "Close",
   },
   theme: { system: "Follow system", light: "Light", dark: "Dark" },
@@ -156,7 +458,9 @@ export const enChatRoom = {
     lastUsed: "Last used",
   },
   operations: {
-    title: "Plugin operations",
+    windowLimit:
+      "Showing the most recent 1,000 operations. Use filters to narrow the history.",
+    title: "Plugin Operations",
     subtitle: "Operations produced by ChatRoom plugins",
     all: "All",
     running: "Running",
@@ -172,7 +476,9 @@ export const enChatRoom = {
     back: "Back to operations",
   },
   systemLogs: {
-    title: "System logs",
+    windowLimit:
+      "Showing the most recent 1,000 log records. Use filters to inspect older records.",
+    title: "System Logs",
     subtitle: "ChatRoom runtime, authentication, Cloud, and plugin events",
     allLevels: "All levels",
     allModules: "All modules",
@@ -205,9 +511,11 @@ export const enChatRoom = {
     error: "Error",
   },
   workspaces: {
+    workspace: "Workspace",
     prompt: "Prompt",
     files: "Files",
     skills: "Skills",
+    git: "Git",
     empty: "No workspaces found under the configured allowed roots.",
     createTitle: "New workspace",
     refresh: "Refresh workspaces",
@@ -223,6 +531,7 @@ export const enChatRoom = {
   },
   git: {
     notRepository: "Not a Git repository",
+    head: "HEAD",
     branch: "Branch",
     upstream: "Upstream",
     sync: "Sync",
@@ -247,6 +556,10 @@ export const enChatRoom = {
     current: "Current",
     switch: "Switch",
     diffTruncated: "Diff preview is truncated.",
+    diffRowsHidden: "{0} more diff rows are hidden for performance.",
+    showMoreDiff: "Show more",
+    diffRenderLimit:
+      "Preview limit reached; use Git locally to inspect the complete diff.",
     noDiff: "No diff to display.",
     noHead: "This repository has no commit yet.",
     restoreTitle: "Discard file changes?",
@@ -267,17 +580,28 @@ export const enChatRoom = {
     file: "File",
     directory: "Directory",
     symlink: "Symbolic link",
+    previewTruncated:
+      "Preview truncated at 2 MiB. The file is larger than the displayed content.",
     previewUnavailable: "Preview not available",
+    preview: "Preview",
+    source: "Source",
     parentDirectory: "Parent directory",
     refresh: "Refresh directory",
+    loadMore: "Load more files",
   },
   skills: {
     empty: "No discovered skills.",
     noDescription: "No description provided in SKILL.md metadata.",
+    sources: {
+      agent: "Agent",
+      claude: "Claude",
+      chatRoom: "ChatRoom",
+    },
   },
   processes: {
     title: "Processes",
     subtitle: "Supervised commands and their current state",
+    pid: "PID",
     command: "Command",
     arguments: "Arguments",
     fullCommand: "Full command",
@@ -298,12 +622,14 @@ export const enChatRoom = {
   code: {
     search: "Search",
     noOutput: "No output.",
+    copyFailed:
+      "Could not copy. Check clipboard permission and use a secure connection.",
     copy: "Copy",
     enableWrap: "Enable line wrapping",
     disableWrap: "Disable line wrapping",
     download: "Download",
   },
-  sources: { mcp: "Model", gui: "Web UI", cli: "CLI", system: "Runtime" },
+  sources: { mcp: "MCP", gui: "Web UI", cli: "CLI", system: "Runtime" },
   statuses: {
     running: "Running",
     success: "Success",
@@ -314,7 +640,11 @@ export const enChatRoom = {
     killed: "Killed",
   },
   actions: {
+    workspaceList: "List workspaces",
     workspaceInfo: "Read workspace info",
+    workspaceCreate: "Create workspace",
+    workspaceFileWrite: "Write workspace file",
+    workspaceAttachmentUpload: "Upload workspace attachment",
     gitStage: "Stage Git changes",
     gitUnstage: "Unstage Git changes",
     gitRestore: "Restore Git file",
@@ -331,6 +661,22 @@ export const enChatRoom = {
     stopProcess: "Stop process",
     terminateProcess: "Terminate process",
     forceStopProcess: "Force stop process",
+    computerSnapshot: "Observe computer",
+    computerAction: "Control computer",
+    computerSettings: "Change Computer Use settings",
+    agentProviders: "List Agent providers",
+    agentProviderDetails: "Read Agent provider details",
+    agentModels: "List Agent models",
+    agentSessions: "List Agent sessions",
+    agentCreate: "Create Agent session",
+    agentSend: "Send Agent instruction",
+    agentSteer: "Steer Agent turn",
+    agentReview: "Start Agent review",
+    agentHistory: "Read Agent history",
+    agentConfigure: "Configure Agent session",
+    agentRespond: "Respond to Agent input",
+    agentInterrupt: "Interrupt Agent turn",
+    agentSwitchProvider: "Switch Agent provider",
     syncCloud: "Sync Cloud status",
     manageCloud: "Open Cloud management",
     restoreCloud: "Restore Cloud subscription",
@@ -338,3 +684,5 @@ export const enChatRoom = {
     setCloudService: "Set Cloud service",
   },
 };
+
+export type EnChatRoomMessages = typeof enChatRoom;

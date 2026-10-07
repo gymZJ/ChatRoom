@@ -1,43 +1,30 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed } from "vue";
 import { useLocale } from "vuetify";
-import {
-  api,
-  type CloudManagementSession,
-  type CloudRestoreResult,
-  type CloudService,
-  type CloudStatus,
-} from "../api.js";
-import { errorMessage } from "../utils/errors.js";
-import { createRequestGate } from "../utils/requests.js";
+import { useCloud } from "../composables/useCloud.js";
 import { appIntlLocale } from "../locales.js";
 
 const locale = useLocale();
-const status = ref<CloudStatus | null>(null);
-const error = ref("");
-const errorVisible = ref(false);
-const recoveryKey = ref("");
-const restoring = ref(false);
-const refreshing = ref(false);
-const confirmationService = ref<CloudService | null>(null);
-const serviceUpdating = ref<CloudService | null>(null);
-const loadRequests = createRequestGate();
-
-const subscribed = computed(() => {
-  const services = new Set(
-    status.value?.entitlements.map((item) => item.service) ?? [],
-  );
-  return services.has("remote_mcp") && services.has("remote_web");
-});
-
-const subscriptionExpiry = computed(() => {
-  const values = (status.value?.entitlements ?? [])
-    .map((item) => item.validUntil)
-    .filter((value): value is string => Boolean(value))
-    .map((value) => Date.parse(value))
-    .filter(Number.isFinite);
-  return values.length ? Math.min(...values) : null;
-});
+const cloud = useCloud();
+const {
+  status,
+  error,
+  errorVisible,
+  recoveryKey,
+  restoring,
+  refreshing,
+  managing,
+  busy,
+  confirmationService,
+  serviceUpdating,
+  subscribed,
+  subscriptionExpiry,
+  refresh,
+  manage,
+  requestServiceChange,
+  confirmDisableService,
+  restore,
+} = cloud;
 
 const subscriptionDescription = computed(() => {
   if (!subscribed.value)
@@ -61,101 +48,6 @@ const confirmationDescription = computed(() =>
     ? locale.t("$vuetify.chatroom.cloud.disableWebDescription")
     : locale.t("$vuetify.chatroom.cloud.disableMcpDescription"),
 );
-
-onMounted(load);
-
-function applyStatus(next: CloudStatus) {
-  status.value = next;
-}
-
-function showError(value: unknown) {
-  error.value = errorMessage(value);
-  errorVisible.value = true;
-}
-
-async function load() {
-  const request = loadRequests.begin();
-  try {
-    const next = await api<CloudStatus>("/cloud/status", {
-      signal: request.signal,
-    });
-    if (loadRequests.isCurrent(request)) applyStatus(next);
-  } catch (value) {
-    if (loadRequests.isCurrent(request)) showError(value);
-  }
-}
-
-async function refresh() {
-  refreshing.value = true;
-  try {
-    applyStatus(await api<CloudStatus>("/cloud/sync", { method: "POST" }));
-  } catch (value) {
-    showError(value);
-  } finally {
-    refreshing.value = false;
-  }
-}
-
-async function manage() {
-  try {
-    const result = await api<CloudManagementSession>("/cloud/management", {
-      method: "POST",
-    });
-    window.open(result.url, "_blank", "noopener,noreferrer");
-  } catch (value) {
-    showError(value);
-  }
-}
-
-function requestServiceChange(service: CloudService, enabled: boolean) {
-  if (enabled) {
-    void setService(service, true);
-    return;
-  }
-  confirmationService.value = service;
-}
-
-async function confirmDisableService() {
-  const service = confirmationService.value;
-  if (!service) return;
-  await setService(service, false);
-  if (serviceUpdating.value === null) confirmationService.value = null;
-}
-
-async function setService(service: CloudService, enabled: boolean) {
-  if (!status.value || serviceUpdating.value) return;
-  serviceUpdating.value = service;
-  try {
-    applyStatus(
-      await api<CloudStatus>(`/cloud/services/${service}`, {
-        method: "POST",
-        body: JSON.stringify({ enabled }),
-      }),
-    );
-  } catch (value) {
-    showError(value);
-  } finally {
-    serviceUpdating.value = null;
-  }
-}
-
-async function restore() {
-  if (!recoveryKey.value.trim()) return;
-  restoring.value = true;
-  try {
-    const result = await api<CloudRestoreResult>("/cloud/restore", {
-      method: "POST",
-      body: JSON.stringify({ recoveryKey: recoveryKey.value.trim() }),
-      timeoutMs: 120_000,
-    });
-    applyStatus(result.status);
-    recoveryKey.value = "";
-  } catch (value) {
-    showError(value);
-  } finally {
-    restoring.value = false;
-  }
-}
 </script>
 
 <template>
@@ -187,13 +79,15 @@ async function restore() {
               size="small"
               variant="text"
               :loading="refreshing"
+              :disabled="busy"
               :aria-label="locale.t('$vuetify.chatroom.cloud.refresh')"
               @click="refresh"
             />
             <v-btn
               variant="text"
               size="small"
-              :disabled="!status.installationId"
+              :disabled="!status.installationId || busy"
+              :loading="managing"
               @click="manage"
             >
               {{ locale.t("$vuetify.chatroom.cloud.manage") }}
@@ -217,7 +111,8 @@ async function restore() {
           <v-switch
             :model-value="status.desiredServices.remote_mcp"
             :loading="serviceUpdating === 'remote_mcp'"
-            :disabled="serviceUpdating !== null"
+            :disabled="busy"
+            :aria-label="locale.t('$vuetify.chatroom.cloud.remoteMcp')"
             @update:model-value="
               requestServiceChange('remote_mcp', Boolean($event))
             "
@@ -239,7 +134,8 @@ async function restore() {
           <v-switch
             :model-value="status.desiredServices.remote_web"
             :loading="serviceUpdating === 'remote_web'"
-            :disabled="serviceUpdating !== null"
+            :disabled="busy"
+            :aria-label="locale.t('$vuetify.chatroom.cloud.remoteWeb')"
             @update:model-value="
               requestServiceChange('remote_web', Boolean($event))
             "
@@ -259,7 +155,8 @@ async function restore() {
             color="primary"
             variant="flat"
             size="small"
-            :disabled="!status.installationId"
+            :disabled="!status.installationId || busy"
+            :loading="managing"
             @click="manage"
           >
             {{ locale.t("$vuetify.chatroom.cloud.purchase") }}
@@ -270,6 +167,7 @@ async function restore() {
           <v-text-field
             v-model="recoveryKey"
             :placeholder="locale.t('$vuetify.chatroom.cloud.recoveryKey')"
+            :aria-label="locale.t('$vuetify.chatroom.cloud.recoveryKey')"
             type="password"
             density="compact"
             variant="outlined"
@@ -279,7 +177,7 @@ async function restore() {
           />
           <v-btn
             :loading="restoring"
-            :disabled="!status.installationId || !recoveryKey.trim()"
+            :disabled="!status.installationId || !recoveryKey.trim() || busy"
             variant="tonal"
             size="small"
             @click="restore"
@@ -311,7 +209,8 @@ async function restore() {
 
   <v-dialog
     :model-value="confirmationService !== null"
-    max-width="480"
+    width="auto"
+    max-width="90vw"
     @update:model-value="!$event && (confirmationService = null)"
   >
     <v-card>
@@ -321,7 +220,7 @@ async function restore() {
         <v-spacer />
         <v-btn
           variant="text"
-          :disabled="serviceUpdating !== null"
+          :disabled="busy"
           @click="confirmationService = null"
         >
           {{ locale.t("$vuetify.chatroom.common.cancel") }}
@@ -352,3 +251,77 @@ async function restore() {
     </template>
   </v-snackbar>
 </template>
+<style>
+.cloud-view {
+  width: 100%;
+}
+
+.cloud-panel {
+  width: 100%;
+}
+
+.cloud-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 10px 18px;
+}
+
+.cloud-row-main {
+  min-width: 0;
+}
+
+.cloud-row-title {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.cloud-row-value {
+  overflow: hidden;
+  margin-top: 3px;
+  color: rgb(var(--v-theme-on-surface), 0.52);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cloud-row .v-switch,
+.cloud-row .v-btn {
+  flex: 0 0 auto;
+}
+
+.cloud-installation-row .cloud-row-main {
+  min-width: 0;
+}
+
+.cloud-row-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+}
+
+.cloud-restore-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 12px 18px;
+}
+
+.cloud-loading {
+  padding: 16px 18px;
+}
+
+@media (max-width: 640px) {
+  .cloud-row-actions {
+    gap: 2px;
+  }
+}
+
+.installation-id {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+</style>

@@ -1,20 +1,21 @@
-import { mkdtemp, open, rm, stat } from "node:fs/promises";
+import { lstat, mkdtemp, open, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { ChatRoomError } from "#core/errors/chatroom-error";
 import type { CommandRunner } from "#core/runtime/command-runner";
 import type {
+  GitAccess,
   GitBranch,
   GitChange,
   GitChangeKind,
   GitCommit,
   GitDiff,
   GitStatus,
-} from "./types.js";
+} from "#app/git-access";
 
 const MAX_PATHS = 512;
 
-export class GitService {
+export class GitService implements GitAccess {
   constructor(private readonly commands: CommandRunner) {}
 
   async status(cwd: string): Promise<GitStatus | null> {
@@ -28,6 +29,38 @@ export class GitService {
       "--untracked-files=all",
     ]);
     return parseStatus(result.stdout);
+  }
+
+  async projectFiles(cwd: string, maxFiles = 5000): Promise<string[] | null> {
+    const root = await this.repositoryRoot(cwd);
+    if (!root) return null;
+    const limit = Math.min(Math.max(Math.trunc(maxFiles), 1), 10_000);
+    const result = await this.run(root, [
+      "ls-files",
+      "-z",
+      "--cached",
+      "--others",
+      "--exclude-standard",
+      "--",
+      ".",
+      ":(exclude).git",
+      ":(exclude).git/**",
+      ":(exclude).chatroom",
+      ":(exclude).chatroom/**",
+    ]);
+    const output: string[] = [];
+    for (const record of result.stdout.split("\0")) {
+      if (!record) continue;
+      if (output.length >= limit) break;
+      const filePath = normalizePath(record);
+      try {
+        if ((await lstat(path.join(root, filePath))).isFile())
+          output.push(filePath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+    }
+    return output;
   }
 
   async diff(

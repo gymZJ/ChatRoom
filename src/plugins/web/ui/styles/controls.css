@@ -61,3 +61,8 @@ body {
 .v-switch.v-switch--loading .v-selection-control {
   opacity: 0.72;
 }
+
+.v-dialog .v-card-title {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}

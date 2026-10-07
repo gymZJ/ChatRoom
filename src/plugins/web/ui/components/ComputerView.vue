@@ -3,9 +3,16 @@ import ComputerOperations from "./ComputerOperations.vue";
 import ComputerPreview from "./ComputerPreview.vue";
 import ComputerStatus from "./ComputerStatus.vue";
 import { useComputer } from "../composables/useComputer.js";
+import type { ComputerRefreshHint } from "../composables/useRuntimeEvents.js";
 
-const props = defineProps<{ revision: number }>();
-const computer = useComputer(() => props.revision);
+const props = defineProps<{
+  revision: number;
+  changes: ComputerRefreshHint | null;
+}>();
+const computer = useComputer(
+  () => props.revision,
+  () => props.changes,
+);
 </script>
 
 <template>

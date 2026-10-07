@@ -1,14 +1,13 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed } from "vue";
 import { useDisplay, useLocale } from "vuetify";
-import { api, type LogLevel, type LogPage, type LogRecord } from "../api.js";
+import type { LogLevel } from "../api.js";
+import { useSystemLogs } from "../composables/useSystemLogs.js";
+import { useMasterDetailFocus } from "../composables/useMasterDetailFocus.js";
 import { appIntlLocale } from "../locales.js";
 import { clock, dateTime } from "../utils.js";
-import { errorMessage } from "../utils/errors.js";
-import { createRequestGate } from "../utils/requests.js";
 import CodeViewer from "./CodeViewer.vue";
 
-const PAGE_SIZE = 100;
 const KNOWN_MODULES = [
   "app",
   "http",
@@ -20,18 +19,21 @@ const KNOWN_MODULES = [
 
 const locale = useLocale();
 const { mdAndDown: compact } = useDisplay();
-const records = ref<LogRecord[]>([]);
-const selected = ref<LogRecord | null>(null);
-const level = ref<LogLevel | "all">("all");
-const module = ref("all");
-const nextCursor = ref<string | null>(null);
-const loading = ref(false);
-const loadingMore = ref(false);
-const error = ref("");
-const listRequests = createRequestGate();
-const moreRequests = createRequestGate();
-let stream: EventSource | null = null;
-let ready = false;
+const { focusDetail, focusMaster } = useMasterDetailFocus(compact);
+const logs = useSystemLogs();
+const {
+  records,
+  selected,
+  level,
+  module,
+  nextCursor,
+  loading,
+  loadingMore,
+  error,
+  limitReached,
+  loadInitial,
+  loadMore,
+} = logs;
 
 const levelItems = computed(() => [
   { title: locale.t("$vuetify.chatroom.systemLogs.allLevels"), value: "all" },
@@ -58,104 +60,6 @@ const detailData = computed(() =>
   selected.value?.data ? JSON.stringify(selected.value.data, null, 2) : "",
 );
 
-watch([level, module], () => {
-  if (ready) void loadInitial();
-});
-
-onMounted(() => {
-  ready = true;
-  void loadInitial().finally(() => {
-    if (ready) connectStream();
-  });
-});
-
-onBeforeUnmount(() => {
-  ready = false;
-  stream?.close();
-  stream = null;
-});
-
-async function loadInitial() {
-  moreRequests.invalidate();
-  loadingMore.value = false;
-  const request = listRequests.begin();
-  loading.value = true;
-  error.value = "";
-  try {
-    const page = await api<LogPage>(logsUrl(), { signal: request.signal });
-    if (!listRequests.isCurrent(request)) return;
-    records.value = page.items;
-    nextCursor.value = page.nextCursor;
-    if (selected.value) {
-      selected.value =
-        page.items.find((item) => item.id === selected.value?.id) ?? null;
-    }
-  } catch (cause) {
-    if (listRequests.isCurrent(request)) error.value = errorMessage(cause);
-  } finally {
-    if (listRequests.isCurrent(request)) loading.value = false;
-  }
-}
-
-async function loadMore() {
-  if (loading.value || !nextCursor.value || loadingMore.value) return;
-  const request = moreRequests.begin();
-  loadingMore.value = true;
-  error.value = "";
-  try {
-    const page = await api<LogPage>(logsUrl(nextCursor.value), {
-      signal: request.signal,
-    });
-    if (!moreRequests.isCurrent(request)) return;
-    const known = new Set(records.value.map((item) => item.id));
-    records.value.push(...page.items.filter((item) => !known.has(item.id)));
-    nextCursor.value = page.nextCursor;
-  } catch (cause) {
-    if (moreRequests.isCurrent(request)) error.value = errorMessage(cause);
-  } finally {
-    if (moreRequests.isCurrent(request)) loadingMore.value = false;
-  }
-}
-
-function logsUrl(cursor?: string): string {
-  const params = new URLSearchParams({ limit: String(PAGE_SIZE) });
-  if (level.value !== "all") params.set("level", level.value);
-  if (module.value !== "all") params.set("module", module.value);
-  if (cursor) params.set("cursor", cursor);
-  return `/logs?${params}`;
-}
-
-function connectStream() {
-  stream?.close();
-  stream = new EventSource("/api/logs/stream");
-  stream.addEventListener("log", (message) => {
-    const record = parseLogEvent(message);
-    if (!record || !matchesFilters(record)) return;
-    if (records.value.some((item) => item.id === record.id)) return;
-    records.value.unshift(record);
-  });
-}
-
-function parseLogEvent(event: Event): LogRecord | null {
-  if (!(event instanceof MessageEvent) || typeof event.data !== "string")
-    return null;
-  try {
-    const value = JSON.parse(event.data) as LogRecord;
-    return typeof value?.id === "string" && typeof value?.message === "string"
-      ? value
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-function matchesFilters(record: LogRecord): boolean {
-  return (
-    (level.value === "all" || record.level === level.value) &&
-    (module.value === "all" || record.module === module.value)
-  );
-}
-
 function levelColor(value: LogLevel): string | undefined {
   if (value === "error") return "error";
   if (value === "warn") return "warning";
@@ -163,13 +67,20 @@ function levelColor(value: LogLevel): string | undefined {
   return undefined;
 }
 
+function selectLog(record: (typeof records.value)[number]) {
+  logs.select(record);
+  focusDetail();
+}
+
 function backToLogs() {
-  selected.value = null;
+  const recordId = selected.value?.id ?? null;
+  logs.clearSelection();
+  if (recordId) focusMaster(`[data-log-id="${CSS.escape(recordId)}"]`);
 }
 </script>
 
 <template>
-  <div class="master-detail-layout system-logs-layout">
+  <div ref="layout" class="master-detail-layout system-logs-layout">
     <div v-if="!compact || !selected" class="master-pane">
       <v-card class="panel-card">
         <div class="panel-header system-logs-header">
@@ -195,7 +106,7 @@ function backToLogs() {
             v-model="level"
             mandatory
             variant="text"
-            class="operation-filters"
+            class="record-filters"
           >
             <v-btn
               v-for="item in levelItems"
@@ -211,6 +122,7 @@ function backToLogs() {
             :items="moduleItems"
             item-title="title"
             item-value="value"
+            :aria-label="locale.t('$vuetify.chatroom.systemLogs.module')"
             density="compact"
             variant="outlined"
             hide-details
@@ -218,25 +130,17 @@ function backToLogs() {
           />
         </div>
         <v-divider />
-        <div v-if="error" class="processes-error" role="alert">
+        <div v-if="error" class="panel-error" role="alert">
           <v-icon icon="$mdiAlertCircleOutline" size="18" />
           <span>{{ error }}</span>
         </div>
 
-        <div v-if="records.length" class="system-log-list" role="grid">
-          <div class="system-log-header" role="row">
-            <span role="columnheader">{{
-              locale.t("$vuetify.chatroom.systemLogs.time")
-            }}</span>
-            <span role="columnheader">{{
-              locale.t("$vuetify.chatroom.systemLogs.level")
-            }}</span>
-            <span role="columnheader">{{
-              locale.t("$vuetify.chatroom.systemLogs.module")
-            }}</span>
-            <span role="columnheader">{{
-              locale.t("$vuetify.chatroom.systemLogs.message")
-            }}</span>
+        <div v-if="records.length" class="system-log-list">
+          <div class="system-log-header" aria-hidden="true">
+            <span>{{ locale.t("$vuetify.chatroom.systemLogs.time") }}</span>
+            <span>{{ locale.t("$vuetify.chatroom.systemLogs.level") }}</span>
+            <span>{{ locale.t("$vuetify.chatroom.systemLogs.module") }}</span>
+            <span>{{ locale.t("$vuetify.chatroom.systemLogs.message") }}</span>
           </div>
           <button
             v-for="record in records"
@@ -244,17 +148,14 @@ function backToLogs() {
             type="button"
             class="system-log-row"
             :class="{ 'selected-row': selected?.id === record.id }"
-            :aria-selected="selected?.id === record.id"
-            @click="selected = record"
+            :aria-current="selected?.id === record.id ? 'true' : undefined"
+            :data-log-id="record.id"
+            @click="selectLog(record)"
           >
-            <span
-              class="system-log-time mono"
-              role="gridcell"
-              :title="record.timestamp"
-            >
+            <span class="system-log-time mono" :title="record.timestamp">
               {{ clock(record.timestamp) }}
             </span>
-            <span class="system-log-level" role="gridcell">
+            <span class="system-log-level">
               <v-chip
                 size="x-small"
                 variant="tonal"
@@ -263,10 +164,10 @@ function backToLogs() {
                 {{ record.level.toUpperCase() }}
               </v-chip>
             </span>
-            <span class="system-log-module mono" role="gridcell">
+            <span class="system-log-module mono">
               {{ record.module }}
             </span>
-            <span class="system-log-message" role="gridcell">
+            <span class="system-log-message">
               <strong>{{ record.message }}</strong>
               <small class="mono">{{ record.event }}</small>
             </span>
@@ -275,6 +176,15 @@ function backToLogs() {
         <div v-else-if="!loading" class="empty-inline">
           {{ locale.t("$vuetify.chatroom.systemLogs.empty") }}
         </div>
+        <v-alert
+          v-if="limitReached"
+          type="info"
+          variant="tonal"
+          density="compact"
+          class="system-log-window-limit"
+        >
+          {{ locale.t("$vuetify.chatroom.systemLogs.windowLimit") }}
+        </v-alert>
         <div v-if="nextCursor" class="system-log-load-more">
           <v-btn
             variant="text"
@@ -288,7 +198,12 @@ function backToLogs() {
       </v-card>
     </div>
 
-    <div v-if="!compact || selected" class="detail-pane">
+    <div
+      v-if="!compact || selected"
+      ref="detailPane"
+      class="detail-pane"
+      tabindex="-1"
+    >
       <v-card v-if="selected" class="panel-card">
         <div class="panel-header compact-header">
           <v-btn
@@ -330,7 +245,7 @@ function backToLogs() {
         <template v-if="detailData">
           <v-divider />
           <div class="system-log-detail-data">
-            <div class="process-full-command-label">
+            <div class="detail-section-label">
               {{ locale.t("$vuetify.chatroom.systemLogs.data") }}
             </div>
             <CodeViewer
@@ -350,3 +265,191 @@ function backToLogs() {
     </div>
   </div>
 </template>
+<style>
+.system-logs-layout {
+  grid-template-columns: minmax(0, 1.65fr) minmax(0, 0.85fr);
+}
+
+.system-log-controls {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+}
+
+.system-log-controls .record-filters {
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.system-log-controls .record-filters::-webkit-scrollbar {
+  display: none;
+}
+
+.system-log-module-filter {
+  min-width: 0;
+  max-width: 45%;
+  flex: 1 1 auto;
+}
+
+.system-log-list {
+  container-type: inline-size;
+}
+
+.system-log-header,
+.system-log-row {
+  display: grid;
+  grid-template-columns:
+    minmax(0, 0.7fr)
+    minmax(0, 0.5fr)
+    minmax(0, 0.65fr)
+    minmax(0, 3.15fr);
+  column-gap: 12px;
+  align-items: center;
+}
+
+.system-log-header {
+  padding: 6px 12px;
+  border-bottom: 1px solid rgb(var(--v-theme-outline), 0.08);
+  background: rgb(var(--v-theme-on-surface), 0.018);
+  color: rgb(var(--v-theme-on-surface), 0.46);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.system-log-header > span:nth-child(2),
+.system-log-header > span:nth-child(3) {
+  justify-self: center;
+  text-align: center;
+}
+
+.system-log-row {
+  width: 100%;
+  content-visibility: auto;
+  contain-intrinsic-size: 40px;
+  min-width: 0;
+  padding: 5px 12px;
+  border: 0;
+  border-bottom: 1px solid rgb(var(--v-theme-outline), 0.08);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.system-log-row:hover,
+.system-log-row.selected-row {
+  background: rgb(var(--v-theme-primary), 0.045);
+}
+
+.system-log-time,
+.system-log-module {
+  color: rgb(var(--v-theme-on-surface), 0.56);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.system-log-module {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.system-log-level,
+.system-log-module {
+  width: 100%;
+  justify-self: stretch;
+  text-align: center;
+}
+
+.system-log-message {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+}
+
+.system-log-message strong,
+.system-log-message small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.system-log-message strong {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.system-log-message small {
+  color: rgb(var(--v-theme-on-surface), 0.48);
+  font-size: 10.5px;
+}
+
+.system-log-load-more {
+  display: flex;
+  justify-content: center;
+  padding: 8px 12px;
+}
+
+.system-log-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.system-log-facts strong {
+  overflow-wrap: anywhere;
+}
+
+.system-log-detail-data {
+  padding: 12px 18px 18px;
+}
+@container (max-width: 620px) {
+  .system-log-header {
+    display: none;
+  }
+
+  .system-log-row {
+    grid-template-columns: max-content max-content minmax(0, 1fr);
+    grid-template-areas:
+      "time level module"
+      "message message message";
+    gap: 4px 8px;
+  }
+
+  .system-log-time {
+    grid-area: time;
+  }
+
+  .system-log-level {
+    grid-area: level;
+  }
+
+  .system-log-module {
+    grid-area: module;
+    min-width: 0;
+    overflow: hidden;
+    text-align: left;
+    text-overflow: ellipsis;
+  }
+
+  .system-log-message {
+    grid-area: message;
+  }
+}
+
+@media (max-width: 1100px) {
+  .system-logs-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .system-logs-layout .detail-pane {
+    position: static;
+  }
+}
+</style>

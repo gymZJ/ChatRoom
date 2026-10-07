@@ -16,7 +16,7 @@ async function init(): Promise<void> {
   console.log(`Allowed roots: ${result.config.allowedRoots.join(", ")}`);
   console.log(`Owner token: ${result.config.auth.ownerToken}`);
   console.log(
-    "Local loopback WebUI does not require authentication by default. Keep the owner token private for public access.",
+    "Local loopback Web UI does not require authentication by default. Keep the owner token private for public access.",
   );
 }
 

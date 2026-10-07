@@ -34,10 +34,18 @@ test("WorkspaceFs rejects traversal, absolute paths, and symlink escape", async 
     await forbidden(() => fs.read("secret-link"));
     await symlink(outside, path.join(workspace, "outside-link"));
     await forbidden(() => fs.write("outside-link/created.txt", "blocked"));
+    await forbidden(() =>
+      fs.writeBytes("outside-link/created.bin", Buffer.from([1, 2, 3])),
+    );
 
     const written = await fs.write("nested/file.txt", "workspace-write");
     assert.equal(written.path, "nested/file.txt");
     assert.equal((await fs.read("nested/file.txt")).content, "workspace-write");
+
+    const binary = Buffer.from([0, 1, 2, 255]);
+    const binaryWritten = await fs.writeBytes("nested/file.bin", binary);
+    assert.equal(binaryWritten.size, binary.length);
+    assert.deepEqual((await fs.readBytes("nested/file.bin")).data, binary);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

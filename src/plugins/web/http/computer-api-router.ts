@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { ComputerService } from "#plugins/computer/computer-service";
 import type { OperationLog } from "#operations/operation-log";
 import type { IngressPolicy } from "#auth/ingress-policy";
-import { asyncRoute } from "#presentation/http/http-utils";
+import { asyncRoute, requireString } from "#presentation/http/http-utils";
 import { ChatRoomError } from "#core/errors/chatroom-error";
 
 const settingsPatchSchema = z
@@ -39,12 +39,12 @@ export function createComputerApiRouter(
   );
 
   function assertLocalPermissionRequest(
-    req: Parameters<IngressPolicy["isExternalWeb"]>[0],
+    req: Parameters<IngressPolicy["isRemoteWeb"]>[0],
   ) {
-    if (ingress.isExternalWeb(req))
+    if (ingress.isRemoteWeb(req))
       throw new ChatRoomError(
         "FORBIDDEN",
-        "Computer permissions can be requested only from the local WebUI",
+        "Computer permissions can be requested only from the local Web UI",
       );
   }
   router.patch(
@@ -71,7 +71,7 @@ export function createComputerApiRouter(
     }),
   );
   router.get("/computer/preview", (req, res) => {
-    const scope = ingress.isExternalWeb(req) ? "remote" : "local";
+    const scope = ingress.isRemoteWeb(req) ? "remote" : "local";
     res.json(
       presentPreview(
         computer.latestSnapshot(scope),
@@ -79,10 +79,23 @@ export function createComputerApiRouter(
       ),
     );
   });
+  router.get("/computer/preview/image", (req, res) => {
+    const scope = ingress.isRemoteWeb(req) ? "remote" : "local";
+    const snapshotId = requireString(req.query.snapshotId, "snapshotId");
+    const screenshot = computer.screenshot(scope, snapshotId);
+    if (!screenshot)
+      throw new ChatRoomError("NOT_FOUND", "Computer screenshot not found");
+    const data = Buffer.from(screenshot.data, "base64");
+    res.setHeader("Content-Type", screenshot.mimeType);
+    res.setHeader("Content-Length", String(data.byteLength));
+    res.setHeader("Cache-Control", "private, max-age=31536000, immutable");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.send(data);
+  });
   router.post(
     "/computer/snapshot",
     asyncRoute(async (req, res) => {
-      const scope = ingress.isExternalWeb(req) ? "remote" : "local";
+      const scope = ingress.isRemoteWeb(req) ? "remote" : "local";
       const value = await computer.snapshot(scope, {
         includeScreenshot: true,
         includeElements: true,
@@ -107,6 +120,8 @@ function presentPreview(
     activeWindow: value.activeWindow,
     cursor: value.cursor,
     elementCount: value.elements.length,
-    screenshot: value.screenshot ?? null,
+    screenshot: value.screenshot
+      ? { mimeType: value.screenshot.mimeType }
+      : null,
   };
 }

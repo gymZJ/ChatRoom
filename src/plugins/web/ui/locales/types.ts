@@ -1,1 +1,1 @@
-export type AppLocale = "en" | "zhHans";
+export type AppLocale = "en" | "zhHans" | "zhHant";

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { ChatRoomError } from "#core/errors/chatroom-error";
 import { childEnvironment } from "#core/runtime/child-environment";
-import { HeadTailBuffer } from "./head-tail-buffer.js";
+import { HeadTailBuffer } from "#core/runtime/head-tail-buffer";
 import type {
   ProcessId,
   ProcessSnapshot,
@@ -98,6 +98,20 @@ export class ProcessSupervisor {
         { cause: error },
       );
     }
+    if (this.shuttingDown) {
+      backend.kill("SIGKILL");
+      if (!adoptedOperation)
+        this.operations.finish(
+          operationId,
+          "cancelled",
+          null,
+          new Error("Process supervisor shut down during process startup"),
+        );
+      throw new ChatRoomError(
+        "CONFLICT",
+        "Process supervisor is shutting down",
+      );
+    }
     let resolveSettled!: (snapshot: ProcessSnapshot) => void;
     const settled = new Promise<ProcessSnapshot>((resolve) => {
       resolveSettled = resolve;
@@ -141,7 +155,7 @@ export class ProcessSupervisor {
         }, 2000).unref();
       }, timeoutMs).unref();
     const snapshot = this.snapshotOf(processId, managed);
-    this.eventBus.emit({ type: "process", process: snapshot });
+    this.eventBus.emit({ type: "process", processId });
     return snapshot;
   }
 
@@ -149,6 +163,12 @@ export class ProcessSupervisor {
     const item = this.require(processId);
     return this.snapshotOf(processId, item);
   }
+
+  summary(processId: ProcessId): ProcessSummary {
+    const item = this.require(processId);
+    return this.summaryOf(processId, item);
+  }
+
   list(): ProcessSnapshot[] {
     return [...this.processes.entries()]
       .map(([id, item]) => this.snapshotOf(id, item))
@@ -204,7 +224,7 @@ export class ProcessSupervisor {
       item.outputEventTimer = setTimeout(() => {
         item.outputEventTimer = null;
         if (item.state === "running")
-          this.eventBus.emit({ type: "process-output", processId });
+          this.eventBus.emit({ type: "process", processId, output: true });
       }, 500).unref();
     }
   }
@@ -239,7 +259,7 @@ export class ProcessSupervisor {
         ? undefined
         : { exitCode, signal, timedOut: snapshot.timedOut },
     );
-    this.eventBus.emit({ type: "process", process: snapshot });
+    this.eventBus.emit({ type: "process", processId });
     item.resolveSettled(snapshot);
     this.trimCompletedProcesses();
   }
@@ -250,6 +270,7 @@ export class ProcessSupervisor {
       .sort(([, a], [, b]) => b.startedAt.getTime() - a.startedAt.getTime());
     for (const [processId] of completed.slice(this.maxCompletedProcesses)) {
       this.processes.delete(processId);
+      this.eventBus.emit({ type: "process", processId, deleted: true });
     }
   }
   private require(processId: string): ManagedProcess {

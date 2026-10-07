@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, watch, shallowRef } from "vue";
 import { useLocale } from "vuetify";
 import { api, type WorkspaceInfo } from "../api.js";
 import { errorMessage } from "../utils/errors.js";
@@ -9,29 +9,39 @@ const SUMMARY_PATH = ".chatroom/summary.md";
 const PROMPT_PATH = ".chatroom/prompt.md";
 
 const props = defineProps<{ root: string }>();
-const summary = ref("");
-const prompt = ref("");
-const originalSummary = ref("");
-const originalPrompt = ref("");
-const loading = ref(false);
-const saving = ref(false);
-const saved = ref(false);
-const error = ref("");
+const summary = shallowRef("");
+const prompt = shallowRef("");
+const originalSummary = shallowRef("");
+const originalPrompt = shallowRef("");
+const loading = shallowRef(false);
+const saving = shallowRef(false);
+const saved = shallowRef(false);
+const error = shallowRef("");
+const loadedRoot = shallowRef<string | null>(null);
 const locale = useLocale();
 const loadRequests = createRequestGate();
 const saveRequests = createRequestGate();
 
 const dirty = computed(
   () =>
-    summary.value !== originalSummary.value ||
-    prompt.value !== originalPrompt.value,
+    loadedRoot.value === props.root &&
+    (summary.value !== originalSummary.value ||
+      prompt.value !== originalPrompt.value),
 );
 
 watch(
   () => props.root,
   () => {
+    loadRequests.invalidate();
     saveRequests.invalidate();
+    summary.value = "";
+    prompt.value = "";
+    originalSummary.value = "";
+    originalPrompt.value = "";
+    loadedRoot.value = null;
     saving.value = false;
+    saved.value = false;
+    error.value = "";
     void load();
   },
   { immediate: true },
@@ -53,6 +63,7 @@ async function load() {
     prompt.value = info.presetPrompt ?? "";
     originalSummary.value = summary.value;
     originalPrompt.value = prompt.value;
+    loadedRoot.value = root;
   } catch (cause) {
     if (loadRequests.isCurrent(request)) error.value = errorMessage(cause);
   } finally {
@@ -74,7 +85,7 @@ async function writeFile(
 }
 
 async function save() {
-  if (!dirty.value || saving.value) return;
+  if (!dirty.value || saving.value || loadedRoot.value !== props.root) return;
   const request = saveRequests.begin();
   const root = props.root;
   const nextSummary = summary.value;
@@ -150,3 +161,20 @@ async function save() {
     </div>
   </div>
 </template>
+
+<style scoped>
+.workspace-prompt-pane {
+  min-width: 0;
+}
+
+.workspace-prompt-form {
+  display: grid;
+  gap: 18px;
+  padding: 18px;
+}
+
+.workspace-prompt-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+</style>

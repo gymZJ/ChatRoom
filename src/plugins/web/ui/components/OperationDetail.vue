@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, shallowRef } from "vue";
 import { useLocale } from "vuetify";
 import type { Operation } from "../api.js";
 import { useOperationLabels } from "../composables/useOperationLabels.js";
@@ -8,12 +8,13 @@ import { dateTime } from "../utils.js";
 import CodeViewer from "./CodeViewer.vue";
 import StateChip from "./StateChip.vue";
 
-defineProps<{ event: Operation | null; showBack?: boolean }>();
+const props = defineProps<{ event: Operation | null; showBack?: boolean }>();
 defineEmits<{ back: [] }>();
-const tab = ref("input");
+const tab = shallowRef("input");
 const locale = useLocale();
 
 const { actionLabel, sourceLabel } = useOperationLabels();
+const terminalOutput = computed(() => terminalText(props.event?.output));
 
 function terminalText(value: unknown): string | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -42,7 +43,7 @@ function terminalText(value: unknown): string | null {
       />
       <div class="min-w-0 detail-header-title">
         <div class="panel-title text-truncate">
-          {{ actionLabel(event.action) }}
+          {{ actionLabel(event.pluginId, event.action) }}
         </div>
         <div class="panel-subtitle">
           {{ sourceLabel(event.source) }} ·
@@ -91,11 +92,16 @@ function terminalText(value: unknown): string | null {
       /></v-window-item>
       <v-window-item value="output" class="pa-3">
         <CodeViewer
-          v-if="terminalText(event.output) !== null"
-          :text="terminalText(event.output) ?? ''"
+          v-if="terminalOutput !== null"
+          :text="terminalOutput ?? ''"
           filename="operation-terminal.txt"
+          :highlight="event.status !== 'running'"
         />
-        <CodeViewer v-else :value="event.output" />
+        <CodeViewer
+          v-else
+          :value="event.output"
+          :highlight="event.status !== 'running'"
+        />
       </v-window-item>
       <v-window-item v-if="event.error" value="failure" class="pa-3">
         <CodeViewer :value="event.error" />

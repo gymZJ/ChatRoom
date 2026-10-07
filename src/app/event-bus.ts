@@ -1,20 +1,35 @@
 import { EventEmitter } from "node:events";
-import type { Operation } from "#core/operations/types";
-import type { ProcessSnapshot } from "#plugins/process/types";
-import type { ComputerSettings } from "#plugins/computer/types";
 
 export type RuntimeEvent =
-  | { type: "operation"; operation: Operation }
-  | { type: "operations-cleared"; deleted: number; preserved: number }
-  | { type: "process"; process: ProcessSnapshot }
-  | { type: "computer-settings"; settings: ComputerSettings }
-  | { type: "process-output"; processId: string };
+  | {
+      type: "operation";
+      operationId: string;
+      pluginId: string;
+    }
+  | { type: "operations-cleared" }
+  | {
+      type: "process";
+      processId: string;
+      output?: boolean;
+      deleted?: boolean;
+    }
+  | { type: "computer-settings" }
+  | { type: "computer-snapshot"; snapshotId: string }
+  | {
+      type: "agent";
+      sessionId: string;
+      turnIds?: string[];
+      itemIds?: string[];
+      deleted?: boolean;
+    };
 
 export class RuntimeEventBus {
   private readonly emitter = new EventEmitter();
+
   emit(event: RuntimeEvent): void {
     this.emitter.emit("event", event);
   }
+
   subscribe(listener: (event: RuntimeEvent) => void): () => void {
     this.emitter.on("event", listener);
     return () => this.emitter.off("event", listener);

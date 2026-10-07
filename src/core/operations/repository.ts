@@ -3,6 +3,8 @@ import type { Operation, OperationStatus } from "./types.js";
 export interface OperationQuery {
   limit?: number;
   offset?: number;
+  beforeStartedAt?: string;
+  beforeOperationId?: string;
   pluginId?: string;
   status?: OperationStatus | string;
 }

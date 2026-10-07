@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { watch, shallowRef } from "vue";
 import { useLocale } from "vuetify";
 import type { GitBranch, GitChange } from "../api.js";
 import { useWorkspaceGit } from "../composables/useWorkspaceGit.js";
@@ -14,6 +14,7 @@ const {
   branches,
   commits,
   selectedPath,
+  selectPath,
   diff,
   loading,
   diffLoading,
@@ -37,11 +38,22 @@ const {
   statusCode,
 } = git;
 
-const commitMessage = ref("");
-const branchDialog = ref(false);
-const newBranch = ref("");
-const restoreTarget = ref<GitChange | null>(null);
-const deleteBranchTarget = ref<GitBranch | null>(null);
+const commitMessage = shallowRef("");
+const branchDialog = shallowRef(false);
+const newBranch = shallowRef("");
+const restoreTarget = shallowRef<GitChange | null>(null);
+const deleteBranchTarget = shallowRef<GitBranch | null>(null);
+
+watch(
+  () => props.root,
+  () => {
+    commitMessage.value = "";
+    branchDialog.value = false;
+    newBranch.value = "";
+    restoreTarget.value = null;
+    deleteBranchTarget.value = null;
+  },
+);
 
 async function confirmRestore() {
   const target = restoreTarget.value;
@@ -95,7 +107,7 @@ async function confirmDeleteBranch() {
             <strong class="mono">{{ status.branch ?? "—" }}</strong>
           </div>
           <div>
-            <span>HEAD</span>
+            <span>{{ locale.t("$vuetify.chatroom.git.head") }}</span>
             <strong class="mono">{{ status.head?.slice(0, 12) ?? "—" }}</strong>
           </div>
           <div>
@@ -113,6 +125,7 @@ async function confirmDeleteBranch() {
             size="small"
             variant="text"
             :loading="loading"
+            :disabled="busy !== null"
             :aria-label="locale.t('$vuetify.chatroom.git.refresh')"
             @click="load"
           />
@@ -182,7 +195,7 @@ async function confirmDeleteBranch() {
             v-for="change in changes"
             :key="change.path"
             :active="selectedPath === change.path"
-            @click="selectedPath = change.path"
+            @click="selectPath(change.path)"
           >
             <template #prepend>
               <span class="git-change-code mono">{{ statusCode(change) }}</span>
@@ -310,7 +323,7 @@ async function confirmDeleteBranch() {
       </div>
     </template>
 
-    <v-dialog v-model="branchDialog" max-width="560">
+    <v-dialog v-model="branchDialog" width="auto" max-width="90vw">
       <v-card>
         <v-card-title>{{
           locale.t("$vuetify.chatroom.git.branches")
@@ -377,7 +390,11 @@ async function confirmDeleteBranch() {
       </v-card>
     </v-dialog>
 
-    <v-dialog :model-value="restoreTarget !== null" max-width="500">
+    <v-dialog
+      :model-value="restoreTarget !== null"
+      width="auto"
+      max-width="90vw"
+    >
       <v-card>
         <v-card-title>
           {{
@@ -411,7 +428,11 @@ async function confirmDeleteBranch() {
       </v-card>
     </v-dialog>
 
-    <v-dialog :model-value="deleteBranchTarget !== null" max-width="460">
+    <v-dialog
+      :model-value="deleteBranchTarget !== null"
+      width="auto"
+      max-width="90vw"
+    >
       <v-card>
         <v-card-title>{{
           locale.t("$vuetify.chatroom.git.deleteBranchTitle")

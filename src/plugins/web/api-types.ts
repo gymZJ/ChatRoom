@@ -5,8 +5,23 @@ import type {
   GitCommit,
   GitDiff,
   GitStatus,
-} from "#plugins/git/types";
+} from "#app/git-access";
 import type { ProcessSnapshot, ProcessSummary } from "#plugins/process/types";
+import type {
+  AgentAttachment,
+  AgentHistory,
+  AgentHistoryUpdate,
+  AgentInteractionResponse,
+  AgentItem,
+  AgentModel,
+  AgentProviderId,
+  AgentProviderDetails,
+  AgentReviewTarget,
+  AgentProviderStatus,
+  AgentSession,
+  AgentTurn,
+  AgentTurnSource,
+} from "#plugins/agent/types";
 import type { McpToolSummary as DomainMcpToolSummary } from "#mcp/server/tool-control";
 import type {
   CloudServiceId,
@@ -15,17 +30,29 @@ import type {
 import type {
   ComputerDisplay,
   ComputerPermission,
-  ComputerSnapshot,
   ComputerStatus,
 } from "#plugins/computer/types";
 import type {
   WorkspaceEntry,
-  WorkspaceFile,
   WorkspaceInfo,
   WorkspaceSkill,
-} from "#plugins/workspace/types";
+} from "#app/workspace-access";
+import type { WorkspaceFile } from "#plugins/workspace/types";
 
 export type {
+  AgentAttachment,
+  AgentHistory,
+  AgentHistoryUpdate,
+  AgentInteractionResponse,
+  AgentItem,
+  AgentModel,
+  AgentProviderId,
+  AgentProviderDetails,
+  AgentReviewTarget,
+  AgentProviderStatus,
+  AgentSession,
+  AgentTurn,
+  AgentTurnSource,
   ComputerDisplay,
   ComputerPermission,
   ComputerStatus,
@@ -51,7 +78,7 @@ export interface ComputerPreviewView {
   activeWindow: string | null;
   cursor: { x: number; y: number } | null;
   elementCount: number;
-  screenshot: ComputerSnapshot["screenshot"] | null;
+  screenshot: { mimeType: "image/jpeg" | "image/png" } | null;
 }
 
 export type Operation = DomainOperation;
@@ -86,6 +113,19 @@ export type CloudStatus = DomainCloudStatus;
 
 export interface WorkspaceFileContent {
   content: string;
+  bytes: number;
+  truncated: boolean;
+  modifiedAt: string;
+}
+
+export interface WorkspaceFilePage {
+  items: WorkspaceFile[];
+  nextOffset: number | null;
+}
+
+export interface WorkspaceProjectFiles {
+  paths: string[];
+  truncated: boolean;
 }
 
 export interface CloudManagementSession {

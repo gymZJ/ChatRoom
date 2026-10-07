@@ -14,12 +14,16 @@ interface RequestGate {
 export function createRequestGate(): RequestGate {
   let generation = 0;
   let controller: AbortController | null = null;
+  let disposed = false;
 
   const gate: RequestGate = {
     begin() {
       controller?.abort();
       controller = new AbortController();
-      return { generation: ++generation, signal: controller.signal };
+      generation += 1;
+      if (disposed)
+        controller.abort(new DOMException("Scope disposed", "AbortError"));
+      return { generation, signal: controller.signal };
     },
     isCurrent(token) {
       return token.generation === generation && !token.signal.aborted;
@@ -31,6 +35,10 @@ export function createRequestGate(): RequestGate {
     },
   };
 
-  if (getCurrentScope()) onScopeDispose(gate.invalidate);
+  if (getCurrentScope())
+    onScopeDispose(() => {
+      disposed = true;
+      gate.invalidate();
+    });
   return gate;
 }

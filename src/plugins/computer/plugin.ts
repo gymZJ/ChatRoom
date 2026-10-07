@@ -1,5 +1,5 @@
 import type { InternalPlugin } from "#plugins/types";
-import { createServiceToken } from "#plugins/types";
+import { createServiceToken } from "#app/service-registry";
 import { NativeComputerBackend } from "./computer-native-backend.js";
 import { ComputerService } from "./computer-service.js";
 import { ComputerSettingsRepository } from "./computer-settings-repository.js";

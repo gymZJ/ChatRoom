@@ -94,6 +94,7 @@ export function highlightSource(
   source: string,
   options: { filename?: string; language?: string | null } = {},
 ): string | null {
+  if (source.length > 200_000) return null;
   const language = options.language ?? languageForFilename(options.filename);
   if (!language || !hljs.getLanguage(language)) return null;
   return hljs.highlight(source, { language, ignoreIllegals: true }).value;

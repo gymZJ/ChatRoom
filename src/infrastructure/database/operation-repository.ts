@@ -54,13 +54,24 @@ export class OperationRepository implements OperationRepositoryPort {
       where.push("status=?");
       args.push(query.status);
     }
+    if (query.beforeStartedAt && query.beforeOperationId) {
+      where.push("(started_at < ? OR (started_at = ? AND operation_id < ?))");
+      args.push(
+        query.beforeStartedAt,
+        query.beforeStartedAt,
+        query.beforeOperationId,
+      );
+    }
     const limit = Math.min(Math.max(query.limit ?? 100, 1), 500);
-    const offset = Math.max(query.offset ?? 0, 0);
+    const offset =
+      query.beforeStartedAt && query.beforeOperationId
+        ? 0
+        : Math.max(query.offset ?? 0, 0);
     const filter = where.length ? `WHERE ${where.join(" AND ")}` : "";
     return (
       this.database.raw
         .prepare(
-          `SELECT * FROM operations ${filter} ORDER BY started_at DESC LIMIT ? OFFSET ?`,
+          `SELECT * FROM operations ${filter} ORDER BY started_at DESC, operation_id DESC LIMIT ? OFFSET ?`,
         )
         .all(...args, limit, offset) as unknown as OperationRow[]
     ).map(fromRow);

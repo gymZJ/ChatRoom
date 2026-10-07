@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, shallowRef, watch } from "vue";
 import { useLocale } from "vuetify";
 import type { ComputerPreviewView } from "../api.js";
 import { appIntlLocale } from "../locales.js";
@@ -15,11 +15,26 @@ const emit = defineEmits<{ refresh: [] }>();
 const locale = useLocale();
 
 const screenshotUrl = computed(() => {
-  const screenshot = props.preview?.screenshot;
-  return screenshot
-    ? `data:${screenshot.mimeType};base64,${screenshot.data}`
-    : "";
+  const preview = props.preview;
+  if (!preview?.screenshot) return "";
+  return (
+    "/api/computer/preview/image?snapshotId=" +
+    encodeURIComponent(preview.snapshotId) +
+    "&v=" +
+    encodeURIComponent(String(preview.revision))
+  );
 });
+
+const imageLoading = shallowRef(false);
+const imageFailed = shallowRef(false);
+watch(
+  screenshotUrl,
+  (url) => {
+    imageLoading.value = Boolean(url);
+    imageFailed.value = false;
+  },
+  { immediate: true },
+);
 
 const capturedAt = computed(() => {
   const value = props.preview?.capturedAt;
@@ -61,8 +76,24 @@ const capturedAt = computed(() => {
       >
         {{ locale.t("$vuetify.chatroom.computer.remoteDisabled") }}
       </v-alert>
-      <div v-if="screenshotUrl" class="computer-screen-shell">
+      <div
+        v-if="screenshotUrl"
+        class="computer-screen-shell"
+        :aria-busy="imageLoading"
+      >
+        <v-progress-linear v-if="imageLoading" indeterminate />
+        <v-alert v-if="imageFailed" type="error" variant="tonal">
+          {{ locale.t("$vuetify.chatroom.common.imageLoadFailed") }}
+        </v-alert>
         <img
+          v-else
+          :key="screenshotUrl"
+          decoding="async"
+          @load="imageLoading = false"
+          @error="
+            imageLoading = false;
+            imageFailed = true;
+          "
           :src="screenshotUrl"
           :alt="locale.t('$vuetify.chatroom.computer.latestScreen')"
         />
@@ -111,20 +142,17 @@ const capturedAt = computed(() => {
   border: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
   border-radius: 10px;
   background: rgb(var(--v-theme-surface));
-  line-height: 0;
 }
 
 .computer-screen-shell img {
   display: block;
   width: 100%;
   height: auto;
-  max-height: 62vh;
   object-fit: contain;
 }
 
 .computer-screen-empty {
   display: flex;
-  min-height: 250px;
   flex-direction: column;
   align-items: center;
   justify-content: center;
@@ -168,10 +196,6 @@ const capturedAt = computed(() => {
 @media (max-width: 900px) {
   .computer-preview-meta {
     grid-template-columns: 1fr;
-  }
-
-  .computer-screen-empty {
-    min-height: 190px;
   }
 }
 </style>

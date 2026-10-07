@@ -23,11 +23,13 @@ const { actionLabel, sourceLabel } = useOperationLabels();
       type="button"
       class="responsive-record-row"
       :class="{ 'selected-row': selected === event.operationId }"
+      :aria-current="selected === event.operationId ? 'true' : undefined"
+      :data-operation-id="event.operationId"
       @click="$emit('select', event)"
     >
       <div class="responsive-record-main">
         <div class="responsive-record-title">
-          {{ actionLabel(event.action) }}
+          {{ actionLabel(event.pluginId, event.action) }}
         </div>
         <div class="responsive-record-subtitle mono">{{ event.pluginId }}</div>
       </div>

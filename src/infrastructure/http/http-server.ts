@@ -95,7 +95,7 @@ export class HttpServer {
       },
       mcpAuthentication(this.auth, this.ingress),
       (req, res) => {
-        const scope = this.ingress.isExternalMcp(req) ? "remote" : "local";
+        const scope = this.ingress.isRemoteMcp(req) ? "remote" : "local";
         runWithMcpAccessScope(scope, () => {
           void nodeMcp(req, res, req.body);
         });

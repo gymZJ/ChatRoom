@@ -1,133 +1,52 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { shallowRef, watch } from "vue";
 import { useLocale } from "vuetify";
-import { api, type WorkspaceFile, type WorkspaceFileContent } from "../api.js";
-import { errorMessage } from "../utils/errors.js";
-import { createRequestGate } from "../utils/requests.js";
 import { bytes } from "../utils.js";
+import {
+  isMarkdownFile,
+  nameOf,
+  useWorkspaceFiles,
+} from "../composables/useWorkspaceFiles.js";
 import CodeViewer from "./CodeViewer.vue";
-
-type FilePreview =
-  | { kind: "text"; path: string; content: string }
-  | { kind: "image"; path: string; url: string }
-  | { kind: "unsupported"; path: string };
+import MarkdownContent from "./MarkdownContent.vue";
 
 const props = defineProps<{ root: string }>();
-const files = ref<WorkspaceFile[]>([]);
-const currentPath = ref(".");
-const file = ref<FilePreview | null>(null);
-const loading = ref(false);
-const error = ref("");
 const locale = useLocale();
-const directoryRequests = createRequestGate();
-const previewRequests = createRequestGate();
-
-const entries = computed(() =>
-  [...files.value].sort((a, b) => {
-    if (a.type === "directory" && b.type !== "directory") return -1;
-    if (a.type !== "directory" && b.type === "directory") return 1;
-    return nameOf(a.path).localeCompare(nameOf(b.path));
-  }),
-);
-const breadcrumbs = computed(() => {
-  const parts = currentPath.value === "." ? [] : currentPath.value.split("/");
-  return [
-    { title: "/", path: "." },
-    ...parts.map((part, index) => ({
-      title: part,
-      path: parts.slice(0, index + 1).join("/"),
-    })),
-  ];
-});
-const parentPath = computed(() => {
-  if (currentPath.value === ".") return null;
-  const parts = currentPath.value.split("/");
-  parts.pop();
-  return parts.join("/") || ".";
-});
+const markdownMode = shallowRef<"preview" | "source">("preview");
+const imageLoading = shallowRef(false);
+const imageError = shallowRef(false);
+const workspaceFiles = useWorkspaceFiles(() => props.root);
+const {
+  entries,
+  file,
+  selectedPath,
+  previewLoading,
+  breadcrumbs,
+  parentPath,
+  nextOffset,
+  loading,
+  loadingMore,
+  error,
+  loadDirectory,
+  loadMore,
+  navigate,
+  openEntry,
+} = workspaceFiles;
 
 watch(
-  () => props.root,
+  () => file.value?.path ?? null,
   () => {
-    directoryRequests.invalidate();
-    previewRequests.invalidate();
-    currentPath.value = ".";
-    file.value = null;
-    void loadDirectory();
+    markdownMode.value = "preview";
   },
-  { immediate: true },
 );
 
-async function loadDirectory() {
-  const request = directoryRequests.begin();
-  const root = props.root;
-  const path = currentPath.value;
-  loading.value = true;
-  error.value = "";
-  try {
-    const next = await api<WorkspaceFile[]>(
-      `/workspace/files?root=${encodeURIComponent(root)}&path=${encodeURIComponent(path)}`,
-      { signal: request.signal },
-    );
-    if (
-      !directoryRequests.isCurrent(request) ||
-      props.root !== root ||
-      currentPath.value !== path
-    )
-      return;
-    files.value = next;
-  } catch (cause) {
-    if (directoryRequests.isCurrent(request)) error.value = errorMessage(cause);
-  } finally {
-    if (directoryRequests.isCurrent(request)) loading.value = false;
-  }
-}
-
-async function navigate(path: string) {
-  currentPath.value = path || ".";
-  file.value = null;
-  await loadDirectory();
-}
-
-async function openEntry(entry: WorkspaceFile) {
-  const request = previewRequests.begin();
-  const root = props.root;
-  if (entry.type === "directory") {
-    await navigate(entry.path);
-    return;
-  }
-  if (entry.type !== "file") {
-    file.value = { kind: "unsupported", path: entry.path };
-    return;
-  }
-  if (isImageFile(entry.path)) {
-    file.value = {
-      kind: "image",
-      path: entry.path,
-      url: `/api/workspace/file/image?root=${encodeURIComponent(root)}&path=${encodeURIComponent(entry.path)}`,
-    };
-    return;
-  }
-  if (!isTextFile(entry.path)) {
-    file.value = { kind: "unsupported", path: entry.path };
-    return;
-  }
-  error.value = "";
-  try {
-    const result = await api<WorkspaceFileContent>(
-      `/workspace/file?root=${encodeURIComponent(root)}&path=${encodeURIComponent(entry.path)}`,
-      { signal: request.signal },
-    );
-    if (!previewRequests.isCurrent(request) || props.root !== root) return;
-    file.value = { kind: "text", path: entry.path, content: result.content };
-  } catch (cause) {
-    if (previewRequests.isCurrent(request)) error.value = errorMessage(cause);
-  }
-}
-
-function nameOf(filePath: string): string {
-  return filePath.split("/").pop() ?? filePath;
-}
+watch(
+  () => (file.value?.kind === "image" ? file.value.url : null),
+  (url) => {
+    imageLoading.value = Boolean(url);
+    imageError.value = false;
+  },
+);
 
 function typeLabel(type: string): string {
   if (type === "file") return locale.t("$vuetify.chatroom.files.file");
@@ -135,30 +54,6 @@ function typeLabel(type: string): string {
     return locale.t("$vuetify.chatroom.files.directory");
   if (type === "symlink") return locale.t("$vuetify.chatroom.files.symlink");
   return type;
-}
-
-function isImageFile(filePath: string): boolean {
-  return /\.(png|jpe?g|gif|webp|avif|bmp|ico)$/i.test(filePath);
-}
-
-function isTextFile(filePath: string): boolean {
-  const base = filePath.split("/").pop()?.toLowerCase() ?? "";
-  if (
-    [
-      "dockerfile",
-      "makefile",
-      "license",
-      "readme",
-      ".gitignore",
-      ".gitattributes",
-      ".editorconfig",
-      ".env",
-    ].includes(base)
-  )
-    return true;
-  return /\.(txt|md|markdown|json|jsonc|ya?ml|toml|ini|conf|config|xml|html?|css|scss|less|vue|[cm]?[jt]sx?|py|rs|go|java|kt|kts|c|cc|cpp|cxx|h|hpp|sh|bash|zsh|fish|ps1|sql|graphql|gql|proto|diff|patch|csv|tsv|log)$/i.test(
-    filePath,
-  );
 }
 </script>
 
@@ -197,7 +92,7 @@ function isTextFile(filePath: string): boolean {
             variant="text"
             :loading="loading"
             :aria-label="locale.t('$vuetify.chatroom.files.refresh')"
-            @click="loadDirectory"
+            @click="loadDirectory()"
           />
         </div>
 
@@ -208,9 +103,9 @@ function isTextFile(filePath: string): boolean {
           class="workspace-file-list"
         >
           <v-list-item
-            v-for="entry in entries.slice(0, 500)"
+            v-for="entry in entries"
             :key="entry.path"
-            :active="file?.path === entry.path"
+            :active="selectedPath === entry.path"
             :title="nameOf(entry.path)"
             :subtitle="
               entry.type === 'file'
@@ -230,11 +125,74 @@ function isTextFile(filePath: string): boolean {
             @click="openEntry(entry)"
           />
         </v-list>
+        <div v-if="nextOffset !== null" class="workspace-file-load-more">
+          <v-btn
+            size="small"
+            variant="text"
+            :loading="loadingMore"
+            :disabled="loading"
+            @click="loadMore"
+          >
+            {{ locale.t("$vuetify.chatroom.files.loadMore") }}
+          </v-btn>
+        </div>
       </div>
 
-      <div class="workspace-file-preview">
+      <div
+        class="workspace-file-preview"
+        :aria-busy="previewLoading || imageLoading"
+      >
+        <v-progress-linear v-if="previewLoading" indeterminate />
+        <v-alert
+          v-if="file?.kind === 'text' && file.truncated"
+          type="warning"
+          variant="tonal"
+          density="compact"
+          class="workspace-preview-truncated"
+        >
+          {{ locale.t("$vuetify.chatroom.files.previewTruncated") }}
+        </v-alert>
+        <v-sheet
+          v-if="file?.kind === 'text' && isMarkdownFile(file.path)"
+          border
+          rounded="lg"
+          class="workspace-markdown-preview"
+        >
+          <div class="workspace-markdown-header">
+            <span class="workspace-markdown-path mono">{{ file.path }}</span>
+            <v-btn-toggle
+              v-model="markdownMode"
+              mandatory
+              density="compact"
+              variant="text"
+              divided
+              class="workspace-markdown-mode"
+            >
+              <v-btn value="preview" size="small">
+                {{ locale.t("$vuetify.chatroom.files.preview") }}
+              </v-btn>
+              <v-btn value="source" size="small">
+                {{ locale.t("$vuetify.chatroom.files.source") }}
+              </v-btn>
+            </v-btn-toggle>
+          </div>
+          <v-divider />
+          <div
+            v-if="markdownMode === 'preview'"
+            class="workspace-markdown-body"
+          >
+            <MarkdownContent :text="file.content" />
+          </div>
+          <div v-else class="workspace-markdown-source">
+            <CodeViewer
+              :text="file.content"
+              :filename="file.path"
+              :toolbar="false"
+            />
+          </div>
+        </v-sheet>
         <CodeViewer
-          v-if="file?.kind === 'text'"
+          v-else-if="file?.kind === 'text'"
           :text="file.content"
           :filename="file.path"
         />
@@ -247,7 +205,24 @@ function isTextFile(filePath: string): boolean {
           <div class="workspace-image-header mono">{{ file.path }}</div>
           <v-divider />
           <div class="workspace-image-stage">
-            <img :src="file.url" :alt="file.path" />
+            <v-progress-linear v-if="imageLoading" indeterminate />
+            <v-empty-state
+              v-if="imageError"
+              icon="$mdiAlertCircleOutline"
+              :title="locale.t('$vuetify.chatroom.common.imageLoadFailed')"
+            />
+            <img
+              v-else
+              :key="file.url"
+              :src="file.url"
+              :alt="file.path"
+              decoding="async"
+              @load="imageLoading = false"
+              @error="
+                imageLoading = false;
+                imageError = true;
+              "
+            />
           </div>
         </v-sheet>
         <v-empty-state
@@ -257,7 +232,7 @@ function isTextFile(filePath: string): boolean {
           :text="file.path"
         />
         <v-empty-state
-          v-else
+          v-else-if="!previewLoading"
           icon="$mdiFileEyeOutline"
           :title="locale.t('$vuetify.chatroom.files.select')"
           :text="locale.t('$vuetify.chatroom.files.readOnly')"

@@ -87,4 +87,66 @@ export const DATABASE_SCHEMA = `
     updated_at TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS agent_sessions (
+    id TEXT PRIMARY KEY,
+    workspace_root TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('idle','running','waiting_input','error')),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS agent_sessions_updated_idx ON agent_sessions(updated_at DESC);
+
+  CREATE TABLE IF NOT EXISTS agent_turns (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
+    provider_turn_id TEXT,
+    provider TEXT NOT NULL,
+    model TEXT,
+    reasoning_effort TEXT,
+    reasoning_summary TEXT CHECK(reasoning_summary IN ('auto','concise','detailed','none')),
+    service_tier TEXT,
+    approval_policy_json TEXT,
+    approvals_reviewer TEXT CHECK(approvals_reviewer IN ('user','auto_review','guardian_subagent')),
+    permission_mode TEXT CHECK(permission_mode IN ('default','acceptEdits','bypassPermissions','plan','dontAsk','auto','read-only','workspace-write','danger-full-access')),
+    usage_json TEXT,
+    origin INTEGER NOT NULL CHECK(origin IN (0,1)),
+    status TEXT NOT NULL CHECK(status IN ('running','completed','interrupted','failed')),
+    error_json TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    completed_at TEXT
+  );
+  CREATE INDEX IF NOT EXISTS agent_turns_session_idx ON agent_turns(session_id, started_at ASC);
+
+  CREATE TABLE IF NOT EXISTS agent_items (
+    id TEXT PRIMARY KEY,
+    turn_id TEXT NOT NULL REFERENCES agent_turns(id) ON DELETE CASCADE,
+    provider_item_id TEXT,
+    type TEXT NOT NULL,
+    sequence INTEGER NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('running','completed','waiting','interrupted','failed')),
+    payload_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS agent_items_turn_idx ON agent_items(turn_id, sequence ASC);
+
+  CREATE TABLE IF NOT EXISTS agent_session_providers (
+    session_id TEXT NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
+    provider TEXT NOT NULL,
+    provider_session_id TEXT NOT NULL,
+    model TEXT,
+    reasoning_effort TEXT,
+    reasoning_summary TEXT CHECK(reasoning_summary IN ('auto','concise','detailed','none')),
+    service_tier TEXT,
+    approval_policy_json TEXT,
+    approvals_reviewer TEXT CHECK(approvals_reviewer IN ('user','auto_review','guardian_subagent')),
+    permission_mode TEXT CHECK(permission_mode IN ('default','acceptEdits','bypassPermissions','plan','dontAsk','auto','read-only','workspace-write','danger-full-access')),
+    token_usage_json TEXT,
+    continuity_context TEXT NOT NULL DEFAULT '',
+    synced_through_turn_id TEXT REFERENCES agent_turns(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY(session_id, provider)
+  );
 `;
