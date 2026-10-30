@@ -1,3 +1,29 @@
+export const WORKSPACES_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS workspaces (
+    id TEXT PRIMARY KEY,
+    path TEXT NOT NULL UNIQUE,
+    name_override TEXT,
+    manually_registered INTEGER NOT NULL DEFAULT 0 CHECK(manually_registered IN (0, 1)),
+    discovered_from TEXT,
+    state TEXT NOT NULL DEFAULT 'available' CHECK(state IN ('available', 'missing', 'restore_pending'))
+  );
+`;
+
+export function agentSessionsSchema(
+  table: "agent_sessions" | "agent_sessions_next",
+): string {
+  return `
+  CREATE TABLE IF NOT EXISTS ${table} (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE RESTRICT,
+    provider TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('idle','running','waiting_input','error')),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+`;
+}
+
 export const DATABASE_SCHEMA = `
   CREATE TABLE IF NOT EXISTS operations (
     operation_id TEXT PRIMARY KEY,
@@ -108,23 +134,8 @@ export const DATABASE_SCHEMA = `
     updated_at TEXT NOT NULL
   );
 
-  CREATE TABLE IF NOT EXISTS workspaces (
-    id TEXT PRIMARY KEY,
-    path TEXT NOT NULL UNIQUE,
-    name_override TEXT,
-    manually_registered INTEGER NOT NULL DEFAULT 0 CHECK(manually_registered IN (0, 1)),
-    discovered_from TEXT,
-    state TEXT NOT NULL DEFAULT 'available' CHECK(state IN ('available', 'missing', 'restore_pending'))
-  );
-
-  CREATE TABLE IF NOT EXISTS agent_sessions (
-    id TEXT PRIMARY KEY,
-    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE RESTRICT,
-    provider TEXT NOT NULL,
-    status TEXT NOT NULL CHECK(status IN ('idle','running','waiting_input','error')),
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  );
+  ${WORKSPACES_SCHEMA}
+  ${agentSessionsSchema("agent_sessions")}
   CREATE INDEX IF NOT EXISTS agent_sessions_updated_idx ON agent_sessions(updated_at DESC);
   CREATE INDEX IF NOT EXISTS agent_sessions_workspace_idx ON agent_sessions(workspace_id);
 
