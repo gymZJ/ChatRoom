@@ -39,6 +39,7 @@ const HEADER_NAMES = new Set([
   "if-none-match",
   "if-modified-since",
   "x-chatroom-mime-type",
+  "x-chatroom-upload-size",
 ]);
 const RESPONSE_HEADERS = new Set([
   "content-type",
@@ -47,6 +48,8 @@ const RESPONSE_HEADERS = new Set([
   "content-range",
   "accept-ranges",
   "cache-control",
+  "content-security-policy",
+  "x-content-type-options",
   "etag",
   "last-modified",
 ]);

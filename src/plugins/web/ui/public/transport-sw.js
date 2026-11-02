@@ -231,8 +231,16 @@ async function route(event) {
   const url = new URL(request.url);
   // Explicit HTTP selection and timed-out P2P downloads must stay on HTTP.
   if (
-    url.pathname === "/api/workspace/file/download" &&
+    url.pathname.startsWith("/api/workspace/file/") &&
     url.searchParams.get("__chatroom_http") === "1"
+  )
+    return fetch(request);
+  // Keep conditional cache validation on the native HTTP path. Browsers handle
+  // HTTP 304 cache merging, while a synthetic Service Worker 304 is unreliable.
+  if (
+    request.method === "GET" &&
+    (request.headers.has("if-none-match") ||
+      request.headers.has("if-modified-since"))
   )
     return fetch(request);
   if (!activeClients.has(event.clientId)) return fetch(request);
@@ -242,15 +250,29 @@ async function route(event) {
     return fetch(request);
   }
 
-  const length = Number(request.headers.get("content-length"));
-  if (Number.isFinite(length) && length > MAX_INLINE_UPLOAD)
+  const expectedSize = request.headers.get("x-chatroom-upload-size");
+  const declaredSize = expectedSize === null ? null : Number(expectedSize);
+  if (
+    declaredSize !== null &&
+    (!Number.isSafeInteger(declaredSize) || declaredSize <= 0)
+  )
+    return new Response("Invalid upload size", { status: 400 });
+  if (declaredSize !== null && declaredSize > MAX_INLINE_UPLOAD)
+    return fetch(request);
+  const length = request.headers.get("content-length");
+  if (length !== null && Number(length) > MAX_INLINE_UPLOAD)
     return fetch(request);
   let body = new ArrayBuffer(0);
   if (request.method !== "GET") {
     try {
       const clone = request.clone();
-      if (request.body && clone.body) {
-        // Preserve bounded streaming for upload requests that expose a body.
+      if (url.pathname === "/api/workspace/attachment" || !clone.body) {
+        // Binary uploads must use the Request payload, not a browser-specific
+        // File stream. Firefox can also expose null FetchEvent.request.body.
+        body = await clone.arrayBuffer();
+        if (body.byteLength > MAX_INLINE_UPLOAD) return fetch(request);
+      } else {
+        // Keep all other requests bounded when Content-Length is unavailable.
         const reader = clone.body.getReader();
         const chunks = [];
         let size = 0;
@@ -271,12 +293,9 @@ async function route(event) {
           offset += chunk.byteLength;
         }
         body = buffer.buffer;
-      } else {
-        // Firefox can expose a null FetchEvent.request.body even when POST
-        // data is present. Request.arrayBuffer() still returns that payload.
-        body = await clone.arrayBuffer();
-        if (body.byteLength > MAX_INLINE_UPLOAD) return fetch(request);
       }
+      if (declaredSize !== null && body.byteLength !== declaredSize)
+        return fetch(request);
     } catch {
       return fetch(request);
     }
@@ -307,6 +326,7 @@ async function route(event) {
     "if-none-match",
     "if-modified-since",
     "x-chatroom-mime-type",
+    "x-chatroom-upload-size",
   ]) {
     const value = request.headers.get(name);
     if (value) headers[name] = value;
@@ -336,7 +356,9 @@ async function route(event) {
     return new Response("P2P request status unknown", { status: 504 });
   }
 
-  // Once accepted, a mutation may already have executed. No HTTP retry.
+  // Once accepted, a mutation may already have executed. Only retry GETs
+  // when the P2P response has not started, because GET is safe to repeat.
+  let retryHttp = false;
   const response = await new Promise((resolve) => {
     let controller;
     let finished = false;
@@ -344,6 +366,7 @@ async function route(event) {
     let lastChunkCredit = 0;
     const timer = setTimeout(() => {
       if (!opened) {
+        retryHttp = request.method === "GET";
         resolve(new Response("P2P response timed out", { status: 504 }));
         reply.postMessage({ type: "cancel" });
         close();
@@ -379,6 +402,7 @@ async function route(event) {
         opened = true;
         const status = data.status;
         if (!Number.isInteger(status) || status < 200 || status > 599) {
+          retryHttp = request.method === "GET";
           close();
           resolve(Response.error());
           return;
@@ -402,16 +426,20 @@ async function route(event) {
           close();
         }
       } else if (data?.type === "end") {
-        if (!opened) resolve(Response.error());
-        else controller.close();
+        if (!opened) {
+          retryHttp = request.method === "GET";
+          resolve(Response.error());
+        } else controller.close();
         close();
       } else if (data?.type === "error") {
-        if (!opened)
+        if (!opened) {
+          retryHttp = request.method === "GET";
           resolve(new Response("P2P transport interrupted", { status: 502 }));
-        else controller.error(new Error("P2P transport interrupted"));
+        } else controller.error(new Error("P2P transport interrupted"));
         close();
       }
     };
   });
+  if (retryHttp) return fetch(request);
   return response;
 }

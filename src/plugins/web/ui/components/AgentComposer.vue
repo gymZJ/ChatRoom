@@ -192,7 +192,7 @@ const canSend = computed(
 );
 
 watch(
-  () => [props.session.id, props.session.workspaceRoot] as const,
+  () => [props.session.id, props.session.workspaceId] as const,
   () => {
     resetSessionState();
     void loadProjectFiles();
@@ -215,16 +215,16 @@ onBeforeUnmount(() => {
 async function loadProjectFiles() {
   const request = projectFilesRequests.begin();
   const sessionId = props.session.id;
-  const root = props.session.workspaceRoot;
+  const workspaceId = props.session.workspaceId;
   try {
     const next = await api<WorkspaceProjectFiles>(
-      "/workspace/project-files?root=" + encodeURIComponent(root),
+      "/workspace/project-files?workspaceId=" + encodeURIComponent(workspaceId),
       { timeoutMs: 20_000, signal: request.signal },
     );
     if (
       !projectFilesRequests.isCurrent(request) ||
       props.session.id !== sessionId ||
-      props.session.workspaceRoot !== root
+      props.session.workspaceId !== workspaceId
     )
       return;
     projectFilePaths.value = next.paths;
@@ -300,7 +300,7 @@ async function uploadLocalFiles(event: Event) {
   if (!files.length) return;
 
   const sessionId = props.session.id;
-  const root = props.session.workspaceRoot;
+  const workspaceId = props.session.workspaceId;
   const request = uploadRequests.begin();
   uploadingAttachments.value = true;
 
@@ -308,6 +308,13 @@ async function uploadLocalFiles(event: Event) {
     for (const file of files) {
       if (!uploadRequests.isCurrent(request) || props.session.id !== sessionId)
         return;
+      if (file.size === 0) {
+        emit(
+          "error",
+          locale.t("$vuetify.chatroom.agents.emptyAttachment", file.name),
+        );
+        continue;
+      }
 
       const kind = file.type.startsWith("audio/")
         ? "audio"
@@ -322,13 +329,22 @@ async function uploadLocalFiles(event: Event) {
         continue;
       }
 
+      // A File-backed FetchEvent can expose an empty request body in Safari.
+      // Materialize bytes before fetch so the P2P service worker sees a plain
+      // binary request, not a browser-dependent File stream.
+      const payload = await file.arrayBuffer();
+      if (payload.byteLength !== file.size)
+        throw new Error(
+          locale.t("$vuetify.chatroom.agents.incompleteAttachment", file.name),
+        );
       const uploaded = await api<{
         path: string;
         name: string;
+        size: number;
         mimeType: string | null;
       }>(
-        "/workspace/attachment?root=" +
-          encodeURIComponent(root) +
+        "/workspace/attachment?workspaceId=" +
+          encodeURIComponent(workspaceId) +
           "&sessionId=" +
           encodeURIComponent(sessionId) +
           "&name=" +
@@ -338,8 +354,9 @@ async function uploadLocalFiles(event: Event) {
           headers: {
             "Content-Type": "application/octet-stream",
             "X-ChatRoom-Mime-Type": file.type || "application/octet-stream",
+            "X-ChatRoom-Upload-Size": String(file.size),
           },
-          body: file,
+          body: payload,
           timeoutMs: 60_000,
           signal: request.signal,
         },
@@ -347,6 +364,13 @@ async function uploadLocalFiles(event: Event) {
 
       if (!uploadRequests.isCurrent(request) || props.session.id !== sessionId)
         return;
+      if (uploaded.size !== file.size) {
+        emit(
+          "error",
+          locale.t("$vuetify.chatroom.agents.incompleteAttachment", file.name),
+        );
+        continue;
+      }
       if (!attachmentPaths.value.includes(uploaded.path))
         attachmentPaths.value.push(uploaded.path);
       localAttachmentNames.value[uploaded.path] = uploaded.name;

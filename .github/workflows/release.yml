@@ -9,7 +9,37 @@ permissions:
   id-token: write
 
 jobs:
+  verify-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Verify version and release channel
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          node - <<'NODE'
+          const pkg = require('./package.json');
+          const lock = require('./package-lock.json');
+          const tag = process.env.RELEASE_TAG;
+          const prerelease = process.env.RELEASE_PRERELEASE === 'true';
+          if (tag !== `v${pkg.version}` || lock.version !== pkg.version ||
+              lock.packages[''].version !== pkg.version) {
+            console.error(`Release tag/lockfile mismatch for ${pkg.version}: ${tag}`);
+            process.exit(1);
+          }
+          if (prerelease !== pkg.version.includes('-')) {
+            console.error('GitHub prerelease flag does not match the package version');
+            process.exit(1);
+          }
+          if (!prerelease && pkg.publishConfig?.tag !== 'latest') {
+            console.error('Stable releases must publish with npm tag latest');
+            process.exit(1);
+          }
+          NODE
+
   native-macos:
+    needs: verify-release
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v6
@@ -95,6 +125,7 @@ jobs:
             "$KEYCHAIN_PATH"
 
   native-windows:
+    needs: verify-release
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@v6
@@ -114,6 +145,7 @@ jobs:
           if-no-files-found: error
 
   native-linux:
+    needs: verify-release
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v6
@@ -133,7 +165,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: [native-macos, native-windows, native-linux]
+    needs: [verify-release, native-macos, native-windows, native-linux]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -183,4 +215,6 @@ jobs:
           chmod 755 dist/native/linux/chatroom-computer-helper
 
       - name: Publish to npm
-        run: npm publish --access public --provenance --ignore-scripts
+        env:
+          NPM_DIST_TAG: ${{ github.event.release.prerelease && 'beta' || 'latest' }}
+        run: npm publish --tag "$NPM_DIST_TAG" --access public --provenance --ignore-scripts
