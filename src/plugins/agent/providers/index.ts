@@ -6,10 +6,7 @@ import type { AgentMcpConnection } from "../mcp-gateway.js";
 
 export function createAgentProviders(
   logs: LogWriter,
-  mcpConnection: AgentMcpConnection = {
-    url: "http://127.0.0.1:1/mcp",
-    token: "test-only-token",
-  },
+  mcpConnection: AgentMcpConnection,
 ): AgentProvider[] {
   return [
     new CodexProvider(logs, mcpConnection),

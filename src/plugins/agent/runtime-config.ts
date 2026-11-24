@@ -6,7 +6,6 @@ import {
   isApprovalsReviewer,
   type AgentAttachment,
   type AgentProviderNativeSetting,
-  type AgentReviewTarget,
   type AgentSessionConfig,
   type CodexGranularApprovalPolicy,
 } from "./types.js";
@@ -133,31 +132,6 @@ export function applyNativeSettings(
   check("permissionMode", permission, config.permissionMode);
 
   return config;
-}
-
-export function validateReviewTarget(target: AgentReviewTarget): void {
-  if (!target || typeof target !== "object")
-    throw new ChatRoomError("INVALID_INPUT", "Invalid review target");
-  switch (target.type) {
-    case "uncommittedChanges":
-      return;
-    case "baseBranch":
-      if (typeof target.branch === "string" && target.branch.trim()) return;
-      break;
-    case "commit":
-      if (
-        typeof target.sha === "string" &&
-        target.sha.trim() &&
-        (target.title === null || typeof target.title === "string")
-      )
-        return;
-      break;
-    case "custom":
-      if (typeof target.instructions === "string" && target.instructions.trim())
-        return;
-      break;
-  }
-  throw new ChatRoomError("INVALID_INPUT", "Invalid review target");
 }
 
 /**

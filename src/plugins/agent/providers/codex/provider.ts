@@ -1,4 +1,5 @@
 import type { LogWriter } from "#core/logging/types";
+import type { AgentMcpConnection } from "#plugins/agent/mcp-gateway";
 import { AsyncQueue } from "#plugins/agent/async-queue";
 import type {
   AgentProvider,
@@ -42,7 +43,6 @@ import {
   type CodexNotification,
   type CodexRequestId,
   type CodexServerRequest,
-  type CodexMcpConnection,
 } from "./rpc.js";
 import {
   array,
@@ -200,10 +200,7 @@ export class CodexProvider implements AgentProvider {
 
   constructor(
     private readonly logs: LogWriter,
-    mcpConnection: CodexMcpConnection = {
-      url: "http://127.0.0.1:1/mcp",
-      token: "test-only-token",
-    },
+    mcpConnection: AgentMcpConnection,
   ) {
     this.client = new CodexRpcClient(logs, mcpConnection);
   }

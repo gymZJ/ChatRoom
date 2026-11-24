@@ -96,9 +96,8 @@ export function useProcesses(
     streamReady = false;
     const processId = selected.value;
     if (!processId) return;
-    if (typeof EventSource === "undefined")
-      void loadDetail(selectionGeneration);
-    else connectOutput(processId, selectionGeneration);
+    if (typeof EventSource === "undefined") void loadDetail();
+    else connectOutput(processId);
   });
 
   async function loadInitial() {
@@ -111,7 +110,7 @@ export function useProcesses(
       const next = await api<ProcessSummary[]>("/processes", {
         signal: request.signal,
       });
-      if (disposed || !refreshRequests.isCurrent(request)) return;
+      if (!refreshRequests.isCurrent(request)) return;
       items.value = next;
       initialLoaded = true;
       if (
@@ -193,7 +192,7 @@ export function useProcesses(
       }),
     );
 
-    if (disposed || !refreshRequests.isCurrent(request)) return;
+    if (!refreshRequests.isCurrent(request)) return;
 
     let nextItems = [...items.value];
     for (let index = 0; index < settled.length; index += 1) {
@@ -253,7 +252,7 @@ export function useProcesses(
   /** The selected process receives initial state once, then raw output chunks.
    * The existing runtime events still refresh summaries of other processes.
    */
-  function connectOutput(processId: string, generation: number) {
+  function connectOutput(processId: string) {
     const source = new EventSource(
       `/api/processes/${encodeURIComponent(processId)}/stream`,
     );
@@ -264,11 +263,8 @@ export function useProcesses(
     };
     const buffered = { stdout: "", stderr: "" };
     let outputTimer: ReturnType<typeof setTimeout> | null = null;
-    const active = () =>
-      !disposed &&
-      outputStream === source &&
-      selected.value === processId &&
-      selectionGeneration === generation;
+    // Selection changes and disposal close and replace the stream.
+    const active = () => outputStream === source;
     const discardBuffer = () => {
       if (outputTimer !== null) clearTimeout(outputTimer);
       outputTimer = null;
@@ -297,7 +293,7 @@ export function useProcesses(
       streamReady = false;
       source.close();
       outputStream = null;
-      void loadDetail(generation);
+      void loadDetail();
     };
     source.addEventListener("snapshot", (event) => {
       if (!active()) return;
@@ -356,7 +352,7 @@ export function useProcesses(
             outputTruncated:
               detail.value.outputTruncated || status.outputTruncated,
           };
-        else void loadDetail(generation);
+        else void loadDetail();
         const index = items.value.findIndex(
           (item) => item.processId === processId,
         );
@@ -366,7 +362,7 @@ export function useProcesses(
           items.value = next;
         }
       } catch {
-        void loadDetail(generation);
+        void loadDetail();
       } finally {
         discardBuffer();
         streamReady = false;
@@ -392,7 +388,7 @@ export function useProcesses(
     items.value = next;
   }
 
-  async function loadDetail(selectionAtStart = selectionGeneration) {
+  async function loadDetail() {
     const request = detailRequests.begin();
     const processId = selected.value;
     if (!processId) {
@@ -404,12 +400,7 @@ export function useProcesses(
         `/processes/${encodeURIComponent(processId)}`,
         { signal: request.signal },
       );
-      if (
-        detailRequests.isCurrent(request) &&
-        selected.value === processId &&
-        selectionGeneration === selectionAtStart &&
-        !streamReady
-      )
+      if (detailRequests.isCurrent(request) && !streamReady)
         detail.value = next;
     } catch (cause) {
       if (!detailRequests.isCurrent(request)) return;

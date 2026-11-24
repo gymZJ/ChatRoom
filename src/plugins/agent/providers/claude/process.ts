@@ -1,6 +1,8 @@
 import type { LogWriter } from "#core/logging/types";
+import type { AgentMcpConnection } from "#plugins/agent/mcp-gateway";
 import { LineProcess } from "#core/runtime/line-process";
 import { resolveClaudeLaunch } from "./launch.js";
+import { isRecord } from "../common.js";
 
 export type ClaudeMessage = Record<string, unknown> & { type: string };
 
@@ -9,15 +11,10 @@ export interface ClaudeControlRequest {
   request: Record<string, unknown> & { subtype: string };
 }
 
-export interface ClaudeMcpConnection {
-  url: string;
-  token: string;
-}
-
 export interface ClaudeProcessOptions {
   cwd: string;
   args: string[];
-  mcpConnection: ClaudeMcpConnection | null;
+  mcpConnection: AgentMcpConnection | null;
   onMessage(message: ClaudeMessage): void;
   onControlRequest(request: ClaudeControlRequest): void;
   onControlCancel(requestId: string): void;
@@ -76,7 +73,7 @@ export function claudeEnvironment(
   return { ...env, ...extra };
 }
 
-export function claudeMcpConfig(connection: ClaudeMcpConnection): string {
+export function claudeMcpConfig(connection: AgentMcpConnection): string {
   return JSON.stringify({
     mcpServers: {
       [MCP_SERVER_NAME]: {
@@ -325,8 +322,4 @@ export class ClaudeProcess {
           .join("\n") || null;
     this.options.onMessage(message as ClaudeMessage);
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

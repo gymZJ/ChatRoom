@@ -37,7 +37,6 @@ export function useOperations(
   const retryCounts = new Map<string, number>();
   let initialLoaded = false;
   let pageCursor: { startedAt: string; operationId: string } | null = null;
-  let selectionGeneration = 0;
   let disposed = false;
   const refreshQueue = createEntityRefreshQueue<OperationRefreshHint>({
     keyOf: (change) => change.operationId,
@@ -76,8 +75,7 @@ export function useOperations(
   });
 
   watch(selected, () => {
-    selectionGeneration += 1;
-    void loadDetail(selectionGeneration);
+    void loadDetail();
   });
 
   function operationsUrl(
@@ -107,7 +105,7 @@ export function useOperations(
       const page = await api<OperationSummary[]>(operationsUrl(PAGE_SIZE), {
         signal: request.signal,
       });
-      if (disposed || !listRequests.isCurrent(request)) return;
+      if (!listRequests.isCurrent(request)) return;
       events.value = page.slice(0, MAX_VISIBLE_OPERATIONS);
       limitReached.value = false;
       pageCursor = pageCursorFrom(page);
@@ -116,7 +114,7 @@ export function useOperations(
 
       // List entries are summaries; the selected entry's payloads are
       // always loaded through the detail endpoint.
-      if (selected.value) void loadDetail(selectionGeneration);
+      if (selected.value) void loadDetail();
     } catch (cause) {
       if (listRequests.isCurrent(request)) error.value = errorMessage(cause);
     } finally {
@@ -139,7 +137,7 @@ export function useOperations(
           signal: request.signal,
         },
       );
-      if (disposed || !listRequests.isCurrent(request)) return;
+      if (!listRequests.isCurrent(request)) return;
       if (page.length) pageCursor = pageCursorFrom(page);
       const known = new Set(events.value.map((item) => item.operationId));
       const merged = [
@@ -163,8 +161,6 @@ export function useOperations(
     if (disposed || !next.length) return;
 
     const request = patchRequests.begin();
-    const selectedAtStart = selected.value;
-    const selectionAtStart = selectionGeneration;
     const settled = await Promise.allSettled(
       next.map(async (change) => {
         try {
@@ -178,7 +174,7 @@ export function useOperations(
         }
       }),
     );
-    if (disposed || !patchRequests.isCurrent(request)) return;
+    if (!patchRequests.isCurrent(request)) return;
 
     let nextEvents = [...events.value];
     for (let index = 0; index < settled.length; index += 1) {
@@ -204,12 +200,8 @@ export function useOperations(
         nextEvents.push(patch);
       }
 
-      if (
-        selected.value === patch.operationId &&
-        selectedAtStart === patch.operationId &&
-        selectionGeneration === selectionAtStart
-      )
-        void loadDetail(selectionAtStart);
+      // The list patch is a summary; refresh the selected entry's detail.
+      if (selected.value === patch.operationId) void loadDetail();
     }
 
     nextEvents.sort(
@@ -235,7 +227,7 @@ export function useOperations(
     error.value = errorMessage(cause);
   }
 
-  async function loadDetail(selectionAtStart = selectionGeneration) {
+  async function loadDetail() {
     const operationId = selected.value;
     const request = detailRequests.begin();
     if (!operationId) {
@@ -247,20 +239,11 @@ export function useOperations(
         `/operations/${encodeURIComponent(operationId)}`,
         { signal: request.signal },
       );
-      if (
-        detailRequests.isCurrent(request) &&
-        selected.value === operationId &&
-        selectionGeneration === selectionAtStart
-      )
-        detail.value = next;
+      if (detailRequests.isCurrent(request)) detail.value = next;
     } catch (cause) {
       if (!detailRequests.isCurrent(request)) return;
       if (cause instanceof ApiError && cause.status === 404) {
-        if (
-          selected.value === operationId &&
-          selectionGeneration === selectionAtStart
-        )
-          clearSelection();
+        clearSelection();
         return;
       }
       error.value = errorMessage(cause);

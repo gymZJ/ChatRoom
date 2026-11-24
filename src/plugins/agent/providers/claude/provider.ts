@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import type { LogWriter } from "#core/logging/types";
+import type { AgentMcpConnection } from "#plugins/agent/mcp-gateway";
 import { CommandRunner } from "#core/runtime/command-runner";
 import { AsyncQueue } from "#plugins/agent/async-queue";
 import type {
@@ -56,7 +57,6 @@ import {
   ClaudeProcess,
   claudeEnvironment,
   type ClaudeControlRequest,
-  type ClaudeMcpConnection,
   type ClaudeMessage,
 } from "./process.js";
 
@@ -141,10 +141,7 @@ export class ClaudeCodeProvider implements AgentProvider {
 
   constructor(
     private readonly logs: LogWriter,
-    private readonly mcpConnection: ClaudeMcpConnection = {
-      url: "http://127.0.0.1:1/mcp",
-      token: "test-only-token",
-    },
+    private readonly mcpConnection: AgentMcpConnection,
     private readonly commands = new CommandRunner(),
   ) {}
 
@@ -369,7 +366,7 @@ class ClaudeSession implements ProviderSession {
 
   constructor(
     private readonly logs: LogWriter,
-    private readonly mcpConnection: ClaudeMcpConnection,
+    private readonly mcpConnection: AgentMcpConnection,
     readonly providerSessionId: string,
     context: AgentProviderContext,
     private conversationStarted: boolean,

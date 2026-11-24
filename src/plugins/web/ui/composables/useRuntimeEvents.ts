@@ -178,9 +178,11 @@ export function useRuntimeEvents() {
       if (!event) return;
       switch (event.type) {
         case "agent":
+          // The server already coalesces Agent deltas (150 ms), so these
+          // are applied without the client-side delay.
           if (event.sessionId) mergeAgentChange(event);
           else pendingGlobalAgentEvent = true;
-          scheduleRefresh("agents");
+          flushAgents();
           break;
         case "process":
           mergeProcessChange(event);
@@ -313,19 +315,22 @@ export function useRuntimeEvents() {
       computerRevision.value += 1;
     }
 
-    if (pendingScopes.delete("agents")) {
-      agentChanges.value = pendingGlobalAgentEvent
-        ? null
-        : [...pendingAgentChanges].map(([sessionId, change]) => ({
-            sessionId,
-            turnIds: [...change.turnIds],
-            itemIds: [...change.itemIds],
-            deleted: change.deleted,
-          }));
-      pendingAgentChanges.clear();
-      pendingGlobalAgentEvent = false;
-      agentRevision.value += 1;
-    }
+    if (pendingScopes.has("agents")) flushAgents();
+  }
+
+  function flushAgents() {
+    pendingScopes.delete("agents");
+    agentChanges.value = pendingGlobalAgentEvent
+      ? null
+      : [...pendingAgentChanges].map(([sessionId, change]) => ({
+          sessionId,
+          turnIds: [...change.turnIds],
+          itemIds: [...change.itemIds],
+          deleted: change.deleted,
+        }));
+    pendingAgentChanges.clear();
+    pendingGlobalAgentEvent = false;
+    agentRevision.value += 1;
   }
 
   function clearPending() {

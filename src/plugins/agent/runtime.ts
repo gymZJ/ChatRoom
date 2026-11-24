@@ -15,7 +15,6 @@ import {
   validateInputModalities,
   copyAgentSessionConfig,
   emptyAgentSessionConfig,
-  validateReviewTarget,
 } from "./runtime-config.js";
 import {
   cleanupOrphanAttachments as cleanupOrphanAttachmentFiles,
@@ -312,7 +311,6 @@ export class AgentRuntime {
           "UNSUPPORTED",
           session.provider + " does not support native review turns",
         );
-      validateReviewTarget(target);
       const providerSession = await this.providerSession(session);
       if (!providerSession.runReview)
         throw new ChatRoomError(

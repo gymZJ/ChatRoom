@@ -37,6 +37,12 @@ import type {
   AgentTokenUsage,
 } from "../../src/plugins/agent/types.js";
 import { WorkspaceService } from "../../src/plugins/workspace/workspace-service.js";
+import { CodexProvider } from "../../src/plugins/agent/providers/codex/provider.js";
+import { silentLogs, unusedMcpConnection } from "../helpers/agent.js";
+
+// The fake Codex provider declares the real Codex native settings.
+const codexNativeSettings = new CodexProvider(silentLogs, unusedMcpConnection)
+  .nativeSettings;
 
 const defaultConfig: AgentSessionConfig = {
   model: null,
@@ -171,48 +177,7 @@ class FakeProvider implements AgentProvider {
     this.id = id;
     this.displayName = id;
     this.features = features;
-    this.nativeSettings =
-      id === "codex"
-        ? [
-            {
-              id: "approvalPolicy",
-              defaultValue: "on-request",
-              options: [
-                { id: "untrusted", description: null },
-                { id: "on-request", description: null },
-                { id: "granular", description: null },
-                { id: "never", description: null },
-              ],
-              granularFields: [
-                { id: "sandbox_approval", description: null },
-                { id: "rules", description: null },
-                { id: "skill_approval", description: null },
-                { id: "request_permissions", description: null },
-                { id: "mcp_elicitations", description: null },
-              ],
-            },
-            {
-              id: "permissionMode",
-              defaultValue: "workspace-write",
-              options: [
-                { id: "read-only", description: null },
-                { id: "workspace-write", description: null },
-                { id: "danger-full-access", description: null },
-              ],
-              granularFields: [],
-            },
-            {
-              id: "approvalsReviewer",
-              defaultValue: "user",
-              options: [
-                { id: "user", description: null },
-                { id: "auto_review", description: null },
-                { id: "guardian_subagent", description: null },
-              ],
-              granularFields: [],
-            },
-          ]
-        : [];
+    this.nativeSettings = id === "codex" ? codexNativeSettings : [];
   }
   readonly session = new FakeSession();
 

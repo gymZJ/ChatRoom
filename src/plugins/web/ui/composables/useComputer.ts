@@ -128,7 +128,7 @@ export function useComputer(
         "/operations?pluginId=computer&limit=50",
         { signal: request.signal },
       );
-      if (disposed || !operationListRequests.isCurrent(request)) return;
+      if (!operationListRequests.isCurrent(request)) return;
       operations.value = next;
       operationsLoaded = true;
     } catch (cause) {
@@ -160,7 +160,7 @@ export function useComputer(
         }
       }),
     );
-    if (disposed || !operationPatchRequests.isCurrent(request)) return;
+    if (!operationPatchRequests.isCurrent(request)) return;
 
     const next = [...operations.value];
     for (let index = 0; index < settled.length; index += 1) {

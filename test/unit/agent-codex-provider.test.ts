@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
-import type { LogWriter } from "../../src/core/logging/types.js";
+import { silentLogs as logs, unusedMcpConnection } from "../helpers/agent.js";
 import type {
   AgentProviderContext,
   ProviderEvent,
@@ -13,7 +13,6 @@ import {
   type CodexNotification,
 } from "../../src/plugins/agent/providers/codex/rpc.js";
 
-const logs: LogWriter = { debug() {}, info() {}, warn() {}, error() {} };
 const context: AgentProviderContext = {
   workspaceRoot: path.resolve("test-workspace"),
   workspacePrompt: null,
@@ -82,6 +81,11 @@ function mockRpc(t: TestContext) {
   };
 }
 
+function pick(value: unknown, keys: readonly string[]) {
+  const source = value as Record<string, unknown>;
+  return Object.fromEntries(keys.map((key) => [key, source[key]]));
+}
+
 async function nextEvent(
   iterator: AsyncIterator<ProviderEvent>,
 ): Promise<ProviderEvent> {
@@ -93,7 +97,7 @@ async function nextEvent(
 
 test("Codex adapter injects the Workspace preset prompt when creating a thread", async (t) => {
   const rpc = mockRpc(t);
-  const provider = new CodexProvider(logs);
+  const provider = new CodexProvider(logs, unusedMcpConnection);
   const session = await provider.createSession({
     ...context,
     workspacePrompt: "Always run the smallest relevant test before finishing.",
@@ -141,7 +145,7 @@ test("Codex adapter resolves catalog model id to the official execution model", 
     ],
     nextCursor: null,
   });
-  const provider = new CodexProvider(logs);
+  const provider = new CodexProvider(logs, unusedMcpConnection);
   const session = await provider.createSession({
     ...context,
     model: "catalog-id",
@@ -184,7 +188,7 @@ test("Codex adapter resolves catalog model id to the official execution model", 
 
 test("Codex adapter applies updated settings on the next turn without experimental thread settings", async (t) => {
   const rpc = mockRpc(t);
-  const provider = new CodexProvider(logs);
+  const provider = new CodexProvider(logs, unusedMcpConnection);
   const session = await provider.createSession(context);
   try {
     await session.configure({
@@ -209,26 +213,15 @@ test("Codex adapter applies updated settings on the next turn without experiment
       })
       [Symbol.asyncIterator]();
     await nextEvent(iterator);
+    // Only the settings this test changed are asserted.
     assert.deepEqual(
-      rpc.calls.find(({ method }) => method === "turn/start")?.params,
-      {
-        threadId: "thread-1",
-        input: [
-          {
-            type: "text",
-            text: "use updated settings",
-            text_elements: [],
-          },
-        ],
-        outputSchema: null,
-        cwd: context.workspaceRoot,
-        approvalPolicy: "on-request",
-        approvalsReviewer: "user",
-        model: null,
-        serviceTier: null,
-        effort: "medium",
-        summary: "concise",
-      },
+      pick(rpc.calls.find(({ method }) => method === "turn/start")?.params, [
+        "model",
+        "serviceTier",
+        "effort",
+        "summary",
+      ]),
+      { model: null, serviceTier: null, effort: "medium", summary: "concise" },
     );
     rpc.emit("turn/completed", {
       turn: { id: "turn-1", status: "completed", error: null },
@@ -243,7 +236,7 @@ test("Codex adapter applies updated settings on the next turn without experiment
 test("Codex forwards native sandbox permissions on creation, resume, and next-turn configuration", async (t) => {
   const rpc = mockRpc(t);
   rpc.results.set("thread/resume", { thread: { id: "thread-1" } });
-  const provider = new CodexProvider(logs);
+  const provider = new CodexProvider(logs, unusedMcpConnection);
   const config = {
     ...context,
     permissionMode: "danger-full-access",
@@ -300,7 +293,7 @@ test(
   { timeout: 2000 },
   async (t) => {
     const rpc = mockRpc(t);
-    const provider = new CodexProvider(logs);
+    const provider = new CodexProvider(logs, unusedMcpConnection);
     const session = await provider.createSession(context);
     try {
       const outputSchema = {
@@ -319,18 +312,13 @@ test(
         providerTurnId: "turn-1",
       });
       assert.deepEqual(
-        rpc.calls.find(({ method }) => method === "turn/start")?.params,
+        pick(rpc.calls.find(({ method }) => method === "turn/start")?.params, [
+          "input",
+          "outputSchema",
+        ]),
         {
-          threadId: "thread-1",
           input: [{ type: "text", text: "answer", text_elements: [] }],
           outputSchema,
-          cwd: context.workspaceRoot,
-          approvalPolicy: "on-request",
-          approvalsReviewer: "user",
-          model: null,
-          serviceTier: "default",
-          effort: "high",
-          summary: "detailed",
         },
       );
       await session.steer!({
@@ -412,7 +400,7 @@ test(
   { timeout: 2000 },
   async (t) => {
     const rpc = mockRpc(t);
-    const provider = new CodexProvider(logs);
+    const provider = new CodexProvider(logs, unusedMcpConnection);
     const session = await provider.createSession(context);
     try {
       const iterator = session

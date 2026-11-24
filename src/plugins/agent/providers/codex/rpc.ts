@@ -1,7 +1,9 @@
 import type { LogWriter } from "#core/logging/types";
 import { LineProcess } from "#core/runtime/line-process";
 import { CHATROOM_VERSION } from "#core/runtime/identity";
+import type { AgentMcpConnection } from "#plugins/agent/mcp-gateway";
 import { resolveCodexLaunch } from "./launch.js";
+import { isRecord } from "../common.js";
 
 export type CodexRequestId = string | number;
 
@@ -25,11 +27,6 @@ interface InitializeResult {
   userAgent: string;
 }
 
-export interface CodexMcpConnection {
-  url: string;
-  token: string;
-}
-
 export class CodexRpcClient {
   private process: LineProcess | null = null;
   private readonly pending = new Map<number, PendingRequest>();
@@ -46,10 +43,7 @@ export class CodexRpcClient {
 
   constructor(
     private readonly logs: LogWriter,
-    private readonly mcpConnection: CodexMcpConnection = {
-      url: "http://127.0.0.1:1/mcp",
-      token: "test-only-token",
-    },
+    private readonly mcpConnection: AgentMcpConnection,
   ) {}
 
   async ensureStarted(): Promise<InitializeResult> {
@@ -306,10 +300,6 @@ export class CodexRpcClient {
 
 function isRequestId(value: unknown): value is CodexRequestId {
   return typeof value === "string" || typeof value === "number";
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function rpcErrorMessage(value: unknown): string {

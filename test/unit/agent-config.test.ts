@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { AgentProviderStatus } from "../../src/plugins/agent/types.js";
 import { CodexProvider } from "../../src/plugins/agent/providers/codex/provider.js";
+import { silentLogs, unusedMcpConnection } from "../helpers/agent.js";
 import {
   defaultGranularApproval,
   nativeConfig,
@@ -9,12 +10,7 @@ import {
 } from "../../src/plugins/web/ui/utils/agent-config.js";
 
 test("Agent forms map only advertised native permissions and reset incompatible provider modes", async () => {
-  const codex = new CodexProvider({
-    debug() {},
-    info() {},
-    warn() {},
-    error() {},
-  });
+  const codex = new CodexProvider(silentLogs, unusedMcpConnection);
   const providers: AgentProviderStatus[] = [codex].map((provider) => ({
     id: provider.id,
     displayName: provider.displayName,
@@ -59,9 +55,8 @@ test("native settings are filled and validated from each provider's declaration"
     await import("../../src/plugins/agent/runtime-config.js");
   const { ClaudeCodeProvider } =
     await import("../../src/plugins/agent/providers/claude/provider.js");
-  const logs = { debug() {}, info() {}, warn() {}, error() {} };
-  const codex = new CodexProvider(logs);
-  const claude = new ClaudeCodeProvider(logs);
+  const codex = new CodexProvider(silentLogs, unusedMcpConnection);
+  const claude = new ClaudeCodeProvider(silentLogs, unusedMcpConnection);
   try {
     assert.deepEqual(applyNativeSettings(codex, emptyAgentSessionConfig()), {
       ...emptyAgentSessionConfig(),

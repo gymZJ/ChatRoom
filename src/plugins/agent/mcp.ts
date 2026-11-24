@@ -7,84 +7,21 @@ import {
   openWorldMutation,
 } from "#mcp/server/tool-support";
 import type { AgentRuntime } from "./runtime.js";
+import type { AgentHistoryPage } from "./types.js";
 import {
-  AGENT_PROVIDER_ID_PATTERN,
-  AGENT_PERMISSION_MODES,
-  type AgentHistoryPage,
-  type AgentSessionConfig,
-} from "./types.js";
+  attachmentSchema,
+  configurationPatch,
+  interactionResponseSchema,
+  providerIdSchema,
+  reviewTargetSchema,
+  settingsPatchShape,
+  settingsSchemas,
+} from "./schemas.js";
 
-const provider = z
-  .string()
-  .regex(AGENT_PROVIDER_ID_PATTERN)
-  .describe("Registered Agent provider identifier.");
-const attachment = z.object({
-  kind: z.enum(["image", "audio", "skill", "file"]),
-  name: z.string(),
-  path: z.string(),
-  mimeType: z.string().nullable().default(null),
-});
-
-const granularApprovalPolicy = z.object({
-  granular: z.object({
-    sandbox_approval: z.boolean(),
-    rules: z.boolean(),
-    skill_approval: z.boolean(),
-    request_permissions: z.boolean(),
-    mcp_elicitations: z.boolean(),
-  }),
-});
-const approvalPolicy = z
-  .union([z.enum(["untrusted", "on-request", "never"]), granularApprovalPolicy])
-  .nullable()
-  .describe(
-    'Codex approvalPolicy: "untrusted", "on-request", {granular:{...}}, "never", or null for the provider default.',
-  );
-const approvalsReviewer = z
-  .enum(["user", "auto_review", "guardian_subagent"])
-  .nullable()
-  .describe(
-    'Codex approvalsReviewer: "user", "auto_review", "guardian_subagent", or null for the provider default.',
-  );
-const permissionMode = z
-  .enum(AGENT_PERMISSION_MODES)
-  .nullable()
-  .describe(
-    "Provider-native permissions. Codex supports read-only, workspace-write, and danger-full-access (sandbox). Claude Code supports default, acceptEdits, plan, auto, dontAsk, and bypassPermissions. Null uses the provider default. Read agent_providers for supported options.",
-  );
-
-const settings = {
-  model: z
-    .string()
-    .min(1)
-    .nullable()
-    .describe(
-      "Model identifier advertised by agent_models; null selects the provider default.",
-    ),
-  reasoningEffort: z
-    .string()
-    .min(1)
-    .nullable()
-    .describe(
-      "A reasoning effort advertised by the selected model; null uses its default.",
-    ),
-  reasoningSummary: z
-    .enum(["auto", "concise", "detailed", "none"])
-    .nullable()
-    .describe(
-      "A reasoning summary value supported by the provider/model; null uses its default.",
-    ),
-  serviceTier: z
-    .string()
-    .min(1)
-    .nullable()
-    .describe(
-      "A service tier advertised by the selected model; null uses its default.",
-    ),
-  approvalPolicy,
-  approvalsReviewer,
-  permissionMode,
-};
+const provider = providerIdSchema;
+const attachment = attachmentSchema;
+const interactionResponse = interactionResponseSchema;
+const settings = settingsSchemas;
 
 const tokenUsageBreakdown = z.object({
   totalTokens: z.number(),
@@ -147,17 +84,6 @@ const turn = z.object({
   startedAt: z.string(),
   completedAt: z.string().nullable(),
 });
-
-const interactionResponse = z.discriminatedUnion("type", [
-  z.object({
-    type: z.literal("approval"),
-    decision: z.string().min(1),
-  }),
-  z.object({
-    type: z.literal("input"),
-    answers: z.record(z.string(), z.array(z.string())),
-  }),
-]);
 
 const interactionOption = z.object({
   id: z.string(),
@@ -257,24 +183,6 @@ const item = z.discriminatedUnion("type", [
     text: z.string(),
   }),
 ]);
-
-function configurationPatch(input: {
-  [Key in keyof AgentSessionConfig]?: AgentSessionConfig[Key] | undefined;
-}): Partial<AgentSessionConfig> {
-  const patch: Partial<AgentSessionConfig> = {};
-  for (const key of [
-    "model",
-    "reasoningEffort",
-    "reasoningSummary",
-    "serviceTier",
-    "approvalPolicy",
-    "approvalsReviewer",
-    "permissionMode",
-  ] as const) {
-    if (input[key] !== undefined) Object.assign(patch, { [key]: input[key] });
-  }
-  return patch;
-}
 
 export function registerAgentTools(
   mcp: PluginMcpRegistrar,
@@ -536,16 +444,7 @@ export function registerAgentTools(
         "Start an inline review in the existing Agent conversation for uncommitted changes, a base branch, a commit, or custom instructions. Uses the session settings and records source=mcp. Returns after the review turn starts; use agent_history to inspect progress.",
       inputSchema: z.object({
         sessionId: z.string().min(1),
-        target: z.discriminatedUnion("type", [
-          z.object({ type: z.literal("uncommittedChanges") }),
-          z.object({ type: z.literal("baseBranch"), branch: z.string() }),
-          z.object({
-            type: z.literal("commit"),
-            sha: z.string(),
-            title: z.string().nullable(),
-          }),
-          z.object({ type: z.literal("custom"), instructions: z.string() }),
-        ]),
+        target: reviewTargetSchema,
       }),
       outputSchema: turn,
       annotations: openWorldMutation,
@@ -637,13 +536,7 @@ export function registerAgentTools(
         "Atomically update model settings and provider-native permission settings for subsequent turns. Codex uses approvalPolicy, approvalsReviewer and permissionMode (sandbox); Claude Code uses permissionMode only. Omitted fields retain current values; null resets a field to its provider default. Read agent_providers for the exact native options.",
       inputSchema: z.object({
         sessionId: z.string().min(1),
-        model: settings.model.optional(),
-        reasoningEffort: settings.reasoningEffort.optional(),
-        reasoningSummary: settings.reasoningSummary.optional(),
-        serviceTier: settings.serviceTier.optional(),
-        approvalPolicy: settings.approvalPolicy.optional(),
-        approvalsReviewer: settings.approvalsReviewer.optional(),
-        permissionMode: settings.permissionMode.optional(),
+        ...settingsPatchShape,
       }),
       outputSchema: session,
       annotations: destructiveLocalMutation,
@@ -697,13 +590,7 @@ export function registerAgentTools(
       inputSchema: z.object({
         sessionId: z.string().min(1),
         provider,
-        model: settings.model.optional(),
-        reasoningEffort: settings.reasoningEffort.optional(),
-        reasoningSummary: settings.reasoningSummary.optional(),
-        serviceTier: settings.serviceTier.optional(),
-        approvalPolicy: settings.approvalPolicy.optional(),
-        approvalsReviewer: settings.approvalsReviewer.optional(),
-        permissionMode: settings.permissionMode.optional(),
+        ...settingsPatchShape,
       }),
       outputSchema: session,
       annotations: destructiveLocalMutation,

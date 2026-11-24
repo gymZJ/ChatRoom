@@ -9,7 +9,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import type { LogWriter } from "../../src/core/logging/types.js";
+import { silentLogs as logs } from "../helpers/agent.js";
 import type {
   AgentProviderContext,
   ProviderEvent,
@@ -23,8 +23,6 @@ import {
   structuredPatchDiff,
 } from "../../src/plugins/agent/providers/claude/mapping.js";
 import { ClaudeCodeProvider } from "../../src/plugins/agent/providers/claude/provider.js";
-
-const logs: LogWriter = { debug() {}, info() {}, warn() {}, error() {} };
 
 test("Claude Code model catalog hides the default alias and marks its target", () => {
   const models = claudeModels([
@@ -328,18 +326,16 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 });
 `;
 
-function fakeClaude(t: test.TestContext) {
+const posixOnly = { skip: process.platform === "win32", timeout: 20_000 };
+
+/** Puts the fake CLI on PATH and opens a provider and session against it. */
+async function fakeClaude(t: test.TestContext) {
   const bin = mkdtempSync(path.join(tmpdir(), "chatroom-fake-claude-"));
   const workspace = mkdtempSync(path.join(tmpdir(), "chatroom-claude-ws-"));
   writeFileSync(path.join(bin, "claude"), FAKE_CLAUDE);
   chmodSync(path.join(bin, "claude"), 0o755);
   const previousPath = process.env.PATH;
   process.env.PATH = bin + path.delimiter + (previousPath ?? "");
-  t.after(() => {
-    process.env.PATH = previousPath;
-    rmSync(bin, { recursive: true, force: true });
-    rmSync(workspace, { recursive: true, force: true });
-  });
   const context: AgentProviderContext = {
     workspaceRoot: workspace,
     workspacePrompt: "Prefer small commits.",
@@ -353,12 +349,40 @@ function fakeClaude(t: test.TestContext) {
     continuityContext: null,
     continuityDelta: "Earlier the user asked for a README.",
   };
+  const provider = new ClaudeCodeProvider(logs, {
+    url: "http://127.0.0.1:9/mcp",
+    token: "secret-token",
+  });
+  const session = await provider.createSession(context);
+  t.after(async () => {
+    await session.close();
+    await provider.close();
+    process.env.PATH = previousPath;
+    rmSync(bin, { recursive: true, force: true });
+    rmSync(workspace, { recursive: true, force: true });
+  });
   const log = () =>
     readFileSync(path.join(workspace, "claude-log.jsonl"), "utf8")
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line) as Record<string, any>);
-  return { workspace, context, log };
+  const run = (
+    text: string,
+    onEvent?: (event: ProviderEvent) => Promise<void> | void,
+    outputSchema: unknown = null,
+  ) =>
+    collect(session.runTurn({ text, attachments: [], outputSchema }), onEvent);
+  const lastUserText = () =>
+    log()
+      .filter((entry) => entry.user)
+      .at(-1)!
+      .user.message.content.at(-1).text as string;
+  return { provider, session, context, log, run, lastUserText };
+}
+
+function flagValue(args: string[], flag: string): string | undefined {
+  const index = args.indexOf(flag);
+  return index < 0 ? undefined : args[index + 1];
 }
 
 async function collect(
@@ -373,17 +397,18 @@ async function collect(
   return output;
 }
 
-test(
-  "Claude Code provider drives the stream-json CLI end to end",
-  { skip: process.platform === "win32", timeout: 20_000 },
-  async (t) => {
-    const { context, log } = fakeClaude(t);
-    const provider = new ClaudeCodeProvider(logs, {
-      url: "http://127.0.0.1:9/mcp",
-      token: "secret-token",
-    });
-    t.after(() => provider.close());
+function completedItems(events: ProviderEvent[]) {
+  return events.filter(
+    (event): event is Extract<ProviderEvent, { type: "item.completed" }> =>
+      event.type === "item.completed",
+  );
+}
 
+test(
+  "Claude Code probe, catalog and plan usage come from the CLI",
+  posixOnly,
+  async (t) => {
+    const { provider } = await fakeClaude(t);
     const probe = await provider.probe();
     assert.equal(probe.installed, true);
     assert.equal(probe.authenticated, true);
@@ -396,58 +421,53 @@ test(
       (await provider.details()).accountUsage?.subscriptionType,
       "pro",
     );
+  },
+);
 
-    const session = await provider.createSession(context);
-    t.after(() => session.close());
-    const events = await collect(
-      session.runTurn({
-        text: "use tools",
-        attachments: [],
-        outputSchema: null,
-      }),
-      async (event) => {
-        if (event.type === "interaction.requested")
-          await session.resolveInteraction(event.interaction.id, {
-            type: "approval",
-            decision: "acceptCommandForSession",
-          });
-      },
-    );
-
+test(
+  "Claude Code launches with session settings and keeps the MCP token out of argv",
+  posixOnly,
+  async (t) => {
+    const { session, run, log, lastUserText } = await fakeClaude(t);
+    await run("plain");
     const launch = log()[0]!;
     assert.equal(launch.token, "secret-token");
     assert.equal(launch.ask, "1");
     const args = launch.args as string[];
-    assert.equal(
-      args[args.indexOf("--session-id") + 1],
-      session.providerSessionId,
-    );
-    assert.equal(args[args.indexOf("--permission-mode") + 1], "acceptEdits");
-    assert.equal(args[args.indexOf("--model") + 1], "test");
-    assert.equal(args[args.indexOf("--effort") + 1], "high");
-    assert.equal(args[args.indexOf("--permission-prompt-tool") + 1], "stdio");
+    assert.equal(flagValue(args, "--session-id"), session.providerSessionId);
+    assert.equal(flagValue(args, "--permission-mode"), "acceptEdits");
+    assert.equal(flagValue(args, "--model"), "test");
+    assert.equal(flagValue(args, "--effort"), "high");
+    assert.equal(flagValue(args, "--permission-prompt-tool"), "stdio");
     assert.match(
-      args[args.indexOf("--append-system-prompt") + 1]!,
+      flagValue(args, "--append-system-prompt")!,
       /Prefer small commits/,
     );
+    assert.match(flagValue(args, "--mcp-config")!, /CHATROOM_AGENT_MCP_TOKEN/);
     assert.doesNotMatch(args.join(" "), /secret-token/);
+    // Continuity context is prepended to the first message only.
     assert.match(
-      args[args.indexOf("--mcp-config") + 1]!,
-      /CHATROOM_AGENT_MCP_TOKEN/,
+      lastUserText(),
+      /Earlier the user asked for a README\.[\s\S]*plain/,
     );
+    await run("again");
+    assert.equal(lastUserText(), "again");
+  },
+);
 
-    const user = log().find((entry) => entry.user)!.user;
-    assert.match(
-      user.message.content.at(-1).text,
-      /Earlier the user asked for a README\.[\s\S]*use tools/,
-    );
+test(
+  "Claude Code maps a tool turn to ChatRoom items and usage",
+  posixOnly,
+  async (t) => {
+    const { session, context, run, log } = await fakeClaude(t);
+    const events = await run("use tools", async (event) => {
+      if (event.type === "interaction.requested")
+        await session.resolveInteraction(event.interaction.id, {
+          type: "approval",
+          decision: "acceptCommandForSession",
+        });
+    });
 
-    const decision = log().find((entry) => entry.decision)!.decision;
-    assert.equal(decision.behavior, "allow");
-    assert.deepEqual(decision.updatedInput, { command: "ls" });
-    assert.equal(decision.updatedPermissions[0].destination, "session");
-
-    assert.equal(events[0]!.type, "turn.started");
     const interaction = events.find(
       (event) => event.type === "interaction.requested",
     );
@@ -463,20 +483,14 @@ test(
         "cancel",
       ],
     );
+    const decision = log().find((entry) => entry.decision)!.decision;
+    assert.equal(decision.behavior, "allow");
+    assert.deepEqual(decision.updatedInput, { command: "ls" });
+    assert.equal(decision.updatedPermissions[0].destination, "session");
 
-    const completed = events.filter(
-      (event): event is Extract<ProviderEvent, { type: "item.completed" }> =>
-        event.type === "item.completed",
-    );
-    const text = completed.find(
-      (event) => event.item.type === "assistant_message",
-    );
-    assert.equal(text?.providerItemId, "block:m1:0");
-    assert.deepEqual(text?.item, {
-      type: "assistant_message",
-      text: "Let me look.",
-      phase: null,
-    });
+    const completed = completedItems(events);
+    const item = (id: string) =>
+      completed.find((event) => event.providerItemId === id)?.item;
     assert.ok(
       events.some(
         (event) =>
@@ -485,39 +499,40 @@ test(
           event.delta === "Let me",
       ),
     );
+    assert.deepEqual(item("block:m1:0"), {
+      type: "assistant_message",
+      text: "Let me look.",
+      phase: null,
+    });
+    assert.deepEqual(item("t1"), {
+      type: "command",
+      command: "ls",
+      cwd: context.workspaceRoot,
+      output: "a.txt",
+      exitCode: 0,
+    });
+    assert.deepEqual(item("t2"), {
+      type: "file_change",
+      changes: [
+        {
+          path: "a.txt",
+          kind: "update",
+          movePath: null,
+          diff: "@@ -1,1 +1,1 @@\n-x\n+y",
+        },
+      ],
+    });
     assert.deepEqual(
-      completed.find((event) => event.providerItemId === "t1")?.item,
+      completed.find((event) => event.item.type === "plan")?.item,
       {
-        type: "command",
-        command: "ls",
-        cwd: context.workspaceRoot,
-        output: "a.txt",
-        exitCode: 0,
-      },
-    );
-    assert.deepEqual(
-      completed.find((event) => event.providerItemId === "t2")?.item,
-      {
-        type: "file_change",
-        changes: [
-          {
-            path: "a.txt",
-            kind: "update",
-            movePath: null,
-            diff: "@@ -1,1 +1,1 @@\n-x\n+y",
-          },
+        type: "plan",
+        text: "",
+        steps: [
+          { step: "Edit file", status: "completed" },
+          { step: "Test", status: "inProgress" },
         ],
       },
     );
-    const plan = completed.find((event) => event.item.type === "plan");
-    assert.deepEqual(plan?.item, {
-      type: "plan",
-      text: "",
-      steps: [
-        { step: "Edit file", status: "completed" },
-        { step: "Test", status: "inProgress" },
-      ],
-    });
     assert.equal(
       completed.some(
         (event) =>
@@ -536,37 +551,38 @@ test(
       status: "completed",
       error: null,
     });
+  },
+);
 
-    // Settings changes apply live on the next turn.
+test(
+  "Claude Code applies settings live and answers AskUserQuestion",
+  posixOnly,
+  async (t) => {
+    const { session, context, run, log } = await fakeClaude(t);
+    await run("plain");
     await session.configure({
       ...context,
       model: null,
       permissionMode: "plan",
       reasoningEffort: "low",
     });
-    const questionEvents = await collect(
-      session.runTurn({
-        text: "question",
-        attachments: [],
-        outputSchema: null,
-      }),
-      async (event) => {
-        if (event.type === "interaction.requested") {
-          assert.equal(event.interaction.kind, "input");
-          assert.equal(event.interaction.questions[0]!.question, "Which DB?");
-          await session.resolveInteraction(event.interaction.id, {
-            type: "input",
-            answers: { question_0: ["Postgres"] },
-          });
-        }
-      },
-    );
-    assert.equal(questionEvents.at(-1)?.type, "turn.completed");
-    const controls = log()
-      .filter((entry) => entry.control)
-      .map((entry) => entry.control);
+    const events = await run("question", async (event) => {
+      if (event.type === "interaction.requested") {
+        assert.equal(event.interaction.kind, "input");
+        assert.equal(event.interaction.questions[0]!.question, "Which DB?");
+        await session.resolveInteraction(event.interaction.id, {
+          type: "input",
+          answers: { question_0: ["Postgres"] },
+        });
+      }
+    });
+    assert.equal(events.at(-1)?.type, "turn.completed");
     assert.deepEqual(
-      controls.filter((control) => control.subtype !== "initialize"),
+      log()
+        .filter(
+          (entry) => entry.control && entry.control.subtype !== "initialize",
+        )
+        .map((entry) => entry.control),
       [
         { subtype: "set_model" },
         { subtype: "set_permission_mode", mode: "plan" },
@@ -577,27 +593,20 @@ test(
       .filter((entry) => entry.decision)
       .at(-1)!.decision;
     assert.deepEqual(answer.updatedInput.answers, { "Which DB?": "Postgres" });
-    assert.equal(
-      log()
-        .filter((entry) => entry.user)
-        .at(-1)!
-        .user.message.content.at(-1).text,
-      "question",
-    );
+  },
+);
 
-    // Steering keeps the turn open until queued sends drain.
-    const steerEvents: ProviderEvent[] = [];
-    const steering = collect(
-      session.runTurn({ text: "steer", attachments: [], outputSchema: null }),
-      async (event) => {
-        steerEvents.push(event);
-        if (event.type === "turn.started")
-          await session.steer!({ text: "also this", attachments: [] });
-      },
-    );
-    await steering;
+test(
+  "Claude Code steering keeps the turn open until queued sends drain",
+  posixOnly,
+  async (t) => {
+    const { session, run, log } = await fakeClaude(t);
+    const events = await run("steer", async (event) => {
+      if (event.type === "turn.started")
+        await session.steer!({ text: "also this", attachments: [] });
+    });
     assert.equal(
-      steerEvents.filter((event) => event.type === "turn.completed").length,
+      events.filter((event) => event.type === "turn.completed").length,
       1,
     );
     assert.equal(
@@ -606,34 +615,45 @@ test(
         .at(-1)!.user.priority,
       "next",
     );
+  },
+);
 
-    // Interrupts end the turn as interrupted.
+test(
+  "Claude Code interrupts and failed results end the turn",
+  posixOnly,
+  async (t) => {
+    const { session, run } = await fakeClaude(t);
     const iterator = session
       .runTurn({ text: "hang", attachments: [], outputSchema: null })
       [Symbol.asyncIterator]();
     assert.equal((await iterator.next()).value?.type, "turn.started");
     await session.interrupt();
-    const rest: ProviderEvent[] = [];
+    let last: ProviderEvent | undefined;
     for (
       let next = await iterator.next();
       !next.done;
       next = await iterator.next()
     )
-      rest.push(next.value);
-    assert.deepEqual(rest.at(-1), {
+      last = next.value;
+    assert.deepEqual(last, {
       type: "turn.completed",
       status: "interrupted",
       error: null,
     });
 
-    const failed = await collect(
-      session.runTurn({ text: "fail", attachments: [], outputSchema: null }),
-    );
-    const failure = failed.at(-1);
+    const failure = (await run("fail")).at(-1);
     assert.ok(failure?.type === "turn.completed");
     assert.equal(failure.status, "failed");
     assert.equal(failure.error?.message, "Not logged in · Please run /login");
+  },
+);
 
+test(
+  "Claude Code resumes with --resume and relaunches for an output schema",
+  posixOnly,
+  async (t) => {
+    const { provider, session, context, run, log } = await fakeClaude(t);
+    await run("plain");
     await session.close();
     const resumed = await provider.resumeSession(
       { ...context, continuityDelta: null },
@@ -647,23 +667,10 @@ test(
         outputSchema: { type: "object" },
       }),
     );
-    const resumeArgs = log()
+    const args = log()
       .filter((entry) => entry.args)
       .at(-1)!.args as string[];
-    assert.equal(
-      resumeArgs[resumeArgs.indexOf("--resume") + 1],
-      session.providerSessionId,
-    );
-    assert.equal(
-      resumeArgs[resumeArgs.indexOf("--json-schema") + 1],
-      '{"type":"object"}',
-    );
-    assert.equal(
-      log()
-        .filter((entry) => entry.user)
-        .at(-1)!
-        .user.message.content.at(-1).text,
-      "again",
-    );
+    assert.equal(flagValue(args, "--resume"), session.providerSessionId);
+    assert.equal(flagValue(args, "--json-schema"), '{"type":"object"}');
   },
 );

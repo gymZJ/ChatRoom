@@ -4,10 +4,12 @@ export function array(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
 export function record(value: unknown): Record<string, unknown> | null {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
+  return isRecord(value) ? value : null;
 }
 
 export function questionOptions(value: unknown): AgentInteractionOption[] {
