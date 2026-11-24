@@ -14,21 +14,18 @@ import {
   type AgentAttachment,
   type AgentModel,
   type AgentSession,
-  type WorkspaceProjectFiles,
 } from "../api.js";
 import { createRequestGate } from "../utils/requests.js";
 import AgentProjectFilePicker from "./AgentProjectFilePicker.vue";
 import { errorMessage } from "../utils/errors.js";
 import { agentFileName } from "../utils/agent-display.js";
 import {
-  buildProjectTree,
+  AGENT_UPLOAD_FILE_TYPES,
   extractMentionedPaths,
-  filterProjectFiles,
   imageMimeType,
-  indexProjectFiles,
-  type IndexedProjectFile,
-  type ProjectTreeRow,
 } from "../utils/agent-files.js";
+import { useDebouncedValue } from "../composables/useDebouncedValue.js";
+import { useProjectFiles } from "../composables/useProjectFiles.js";
 
 const props = defineProps<{
   session: AgentSession;
@@ -47,17 +44,20 @@ const message = shallowRef("");
 const attachmentPaths = ref<string[]>([]);
 const localAttachmentNames = ref<Record<string, string>>({});
 const localAttachmentMimes = ref<Record<string, string | null>>({});
-const projectFilePaths = shallowRef<string[]>([]);
-const projectFilesTruncated = shallowRef(false);
-const indexedProjectFiles = shallowRef<IndexedProjectFile[]>([]);
-const projectTreeIndex = shallowRef<ProjectTreeRow[]>([]);
-const expandedDirectories = shallowRef<ReadonlySet<string>>(new Set());
+const projectFiles = useProjectFiles();
+const {
+  truncated: projectFilesTruncated,
+  expandedDirectories,
+  search: workspaceSearch,
+  fileSet: projectFileSet,
+  treeRows: projectTreeRows,
+  toggleDirectory,
+} = projectFiles;
 const workspaceMenu = shallowRef(false);
-const workspaceSearch = shallowRef("");
-const debouncedWorkspaceSearch = shallowRef("");
 const mentionOpen = shallowRef(false);
 const mentionQuery = shallowRef("");
-const debouncedMentionQuery = shallowRef("");
+const { debounced: debouncedMentionQuery, set: setMentionQuery } =
+  useDebouncedValue(mentionQuery, 100);
 const mentionStart = shallowRef(0);
 const mentionEnd = shallowRef(0);
 const composerInputHost = useTemplateRef<HTMLElement>("composerInputHost");
@@ -65,37 +65,9 @@ const localFileInput = useTemplateRef<HTMLInputElement>("localFileInput");
 const sending = shallowRef(false);
 const uploadingAttachments = shallowRef(false);
 
-const projectFilesRequests = createRequestGate();
 const sendRequests = createRequestGate();
 const uploadRequests = createRequestGate();
-let workspaceSearchTimer: ReturnType<typeof setTimeout> | null = null;
-let mentionSearchTimer: ReturnType<typeof setTimeout> | null = null;
 
-watch(workspaceSearch, (value, _previous, onCleanup) => {
-  if (workspaceSearchTimer) clearTimeout(workspaceSearchTimer);
-  workspaceSearchTimer = setTimeout(() => {
-    debouncedWorkspaceSearch.value = value;
-    workspaceSearchTimer = null;
-  }, 120);
-  onCleanup(() => {
-    if (workspaceSearchTimer) clearTimeout(workspaceSearchTimer);
-    workspaceSearchTimer = null;
-  });
-});
-
-watch(mentionQuery, (value, _previous, onCleanup) => {
-  if (mentionSearchTimer) clearTimeout(mentionSearchTimer);
-  mentionSearchTimer = setTimeout(() => {
-    debouncedMentionQuery.value = value;
-    mentionSearchTimer = null;
-  }, 100);
-  onCleanup(() => {
-    if (mentionSearchTimer) clearTimeout(mentionSearchTimer);
-    mentionSearchTimer = null;
-  });
-});
-
-const projectFileSet = computed(() => new Set(projectFilePaths.value));
 const mentionedPaths = computed(() =>
   extractMentionedPaths(message.value, projectFileSet.value),
 );
@@ -110,33 +82,7 @@ const composerAvailable = computed(
 );
 const localUploadAccept = computed(() =>
   [
-    ".txt",
-    ".md",
-    ".json",
-    ".csv",
-    ".pdf",
-    ".doc",
-    ".docx",
-    ".xls",
-    ".xlsx",
-    ".zip",
-    ".yaml",
-    ".yml",
-    ".xml",
-    ".html",
-    ".css",
-    ".js",
-    ".ts",
-    ".py",
-    ".rs",
-    ".go",
-    ".java",
-    ".c",
-    ".cpp",
-    ".sh",
-    ".log",
-    ".toml",
-    ".sql",
+    ...AGENT_UPLOAD_FILE_TYPES,
     ...(supportsAttachment("image") ? ["image/*"] : []),
     ...(supportsAttachment("audio") ? ["audio/*"] : []),
   ].join(","),
@@ -155,32 +101,8 @@ const attachmentError = computed(() =>
     : "",
 );
 const mentionSuggestions = computed(() =>
-  filterProjectFiles(
-    projectFilePaths.value,
-    indexedProjectFiles.value,
-    debouncedMentionQuery.value,
-  ).slice(0, 12),
+  projectFiles.matching(debouncedMentionQuery.value, 12),
 );
-const projectTreeRows = computed<ProjectTreeRow[]>(() => {
-  if (debouncedWorkspaceSearch.value.trim())
-    return filterProjectFiles(
-      projectFilePaths.value,
-      indexedProjectFiles.value,
-      debouncedWorkspaceSearch.value,
-    )
-      .slice(0, 80)
-      .map((filePath) => ({
-        path: filePath,
-        name: agentFileName(filePath),
-        type: "file",
-        depth: 0,
-        ancestors: [],
-      }));
-
-  return projectTreeIndex.value.filter((row) =>
-    row.ancestors.every((parent) => expandedDirectories.value.has(parent)),
-  );
-});
 const canSend = computed(
   () =>
     composerAvailable.value &&
@@ -206,37 +128,19 @@ watch(
   { immediate: true },
 );
 
-onBeforeUnmount(() => {
-  if (workspaceSearchTimer) clearTimeout(workspaceSearchTimer);
-  if (mentionSearchTimer) clearTimeout(mentionSearchTimer);
-  emit("busy", false);
-});
+onBeforeUnmount(() => emit("busy", false));
 
 async function loadProjectFiles() {
-  const request = projectFilesRequests.begin();
   const sessionId = props.session.id;
   const workspaceId = props.session.workspaceId;
   try {
-    const next = await api<WorkspaceProjectFiles>(
-      "/workspace/project-files?workspaceId=" + encodeURIComponent(workspaceId),
-      { timeoutMs: 20_000, signal: request.signal },
+    await projectFiles.load(
+      workspaceId,
+      () =>
+        props.session.id === sessionId &&
+        props.session.workspaceId === workspaceId,
     );
-    if (
-      !projectFilesRequests.isCurrent(request) ||
-      props.session.id !== sessionId ||
-      props.session.workspaceId !== workspaceId
-    )
-      return;
-    projectFilePaths.value = next.paths;
-    projectFilesTruncated.value = next.truncated;
-    indexedProjectFiles.value = indexProjectFiles(next.paths);
-    projectTreeIndex.value = buildProjectTree(next.paths);
   } catch (cause) {
-    if (!projectFilesRequests.isCurrent(request)) return;
-    projectFilePaths.value = [];
-    projectFilesTruncated.value = false;
-    indexedProjectFiles.value = [];
-    projectTreeIndex.value = [];
     emit("error", errorMessage(cause));
   }
 }
@@ -386,13 +290,6 @@ async function uploadLocalFiles(event: Event) {
   }
 }
 
-function toggleDirectory(directoryPath: string) {
-  const next = new Set(expandedDirectories.value);
-  if (next.has(directoryPath)) next.delete(directoryPath);
-  else next.add(directoryPath);
-  expandedDirectories.value = next;
-}
-
 function toggleAttachment(filePath: string) {
   const index = attachmentPaths.value.indexOf(filePath);
   if (index >= 0) attachmentPaths.value.splice(index, 1);
@@ -455,7 +352,7 @@ function composerTextarea(): HTMLTextAreaElement | null {
 }
 
 function resetSessionState() {
-  projectFilesRequests.invalidate();
+  projectFiles.reset();
   sendRequests.invalidate();
   uploadRequests.invalidate();
   sending.value = false;
@@ -464,16 +361,8 @@ function resetSessionState() {
   attachmentPaths.value = [];
   localAttachmentNames.value = {};
   localAttachmentMimes.value = {};
-  projectFilePaths.value = [];
-  projectFilesTruncated.value = false;
-  indexedProjectFiles.value = [];
-  projectTreeIndex.value = [];
-  expandedDirectories.value = new Set();
   workspaceMenu.value = false;
-  workspaceSearch.value = "";
-  debouncedWorkspaceSearch.value = "";
-  mentionQuery.value = "";
-  debouncedMentionQuery.value = "";
+  setMentionQuery("");
   mentionOpen.value = false;
 }
 

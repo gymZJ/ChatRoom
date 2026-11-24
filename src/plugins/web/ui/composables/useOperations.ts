@@ -1,5 +1,10 @@
 import { onScopeDispose, shallowRef, watch, type WatchSource } from "vue";
-import { ApiError, api, type Operation } from "../api.js";
+import {
+  ApiError,
+  api,
+  type Operation,
+  type OperationSummary,
+} from "../api.js";
 import type {
   OperationRefreshBatch,
   OperationRefreshHint,
@@ -15,7 +20,7 @@ export function useOperations(
   revision: WatchSource<number>,
   changes: () => OperationRefreshBatch | null,
 ) {
-  const events = shallowRef<Operation[]>([]);
+  const events = shallowRef<OperationSummary[]>([]);
   const selected = shallowRef<string | null>(null);
   const detail = shallowRef<Operation | null>(null);
   const filter = shallowRef("all");
@@ -79,7 +84,10 @@ export function useOperations(
     limit: number,
     cursor: { startedAt: string; operationId: string } | null = null,
   ): string {
-    const params = new URLSearchParams({ limit: String(limit) });
+    const params = new URLSearchParams({
+      limit: String(limit),
+      view: "summary",
+    });
     if (filter.value !== "all") params.set("status", filter.value);
     if (cursor) {
       params.set("beforeStartedAt", cursor.startedAt);
@@ -96,7 +104,7 @@ export function useOperations(
     loadingMore.value = false;
     error.value = "";
     try {
-      const page = await api<Operation[]>(operationsUrl(PAGE_SIZE), {
+      const page = await api<OperationSummary[]>(operationsUrl(PAGE_SIZE), {
         signal: request.signal,
       });
       if (disposed || !listRequests.isCurrent(request)) return;
@@ -106,17 +114,9 @@ export function useOperations(
       hasMore.value = page.length === PAGE_SIZE;
       initialLoaded = true;
 
-      if (selected.value) {
-        const selectedInPage = page.find(
-          (item) => item.operationId === selected.value,
-        );
-        if (selectedInPage) {
-          detailRequests.invalidate();
-          detail.value = selectedInPage;
-        } else {
-          void loadDetail(selectionGeneration);
-        }
-      }
+      // List entries are summaries; the selected entry's payloads are
+      // always loaded through the detail endpoint.
+      if (selected.value) void loadDetail(selectionGeneration);
     } catch (cause) {
       if (listRequests.isCurrent(request)) error.value = errorMessage(cause);
     } finally {
@@ -133,9 +133,12 @@ export function useOperations(
     const cursor = pageCursor;
     loadingMore.value = true;
     try {
-      const page = await api<Operation[]>(operationsUrl(PAGE_SIZE, cursor), {
-        signal: request.signal,
-      });
+      const page = await api<OperationSummary[]>(
+        operationsUrl(PAGE_SIZE, cursor),
+        {
+          signal: request.signal,
+        },
+      );
       if (disposed || !listRequests.isCurrent(request)) return;
       if (page.length) pageCursor = pageCursorFrom(page);
       const known = new Set(events.value.map((item) => item.operationId));
@@ -165,8 +168,8 @@ export function useOperations(
     const settled = await Promise.allSettled(
       next.map(async (change) => {
         try {
-          return await api<Operation>(
-            `/operations/${encodeURIComponent(change.operationId)}`,
+          return await api<OperationSummary>(
+            `/operations/${encodeURIComponent(change.operationId)}?view=summary`,
             { signal: request.signal },
           );
         } catch (cause) {
@@ -205,10 +208,8 @@ export function useOperations(
         selected.value === patch.operationId &&
         selectedAtStart === patch.operationId &&
         selectionGeneration === selectionAtStart
-      ) {
-        detailRequests.invalidate();
-        detail.value = patch;
-      }
+      )
+        void loadDetail(selectionAtStart);
     }
 
     nextEvents.sort(
@@ -289,9 +290,9 @@ export function useOperations(
     }
   }
 
-  function select(event: Operation) {
+  function select(event: OperationSummary) {
+    if (detail.value?.operationId !== event.operationId) detail.value = null;
     selected.value = event.operationId;
-    detail.value = event;
   }
 
   function clearSelection() {
@@ -345,7 +346,7 @@ export function useOperations(
 }
 
 function pageCursorFrom(
-  page: readonly Operation[],
+  page: readonly OperationSummary[],
 ): { startedAt: string; operationId: string } | null {
   const last = page.at(-1);
   return last
@@ -353,6 +354,6 @@ function pageCursorFrom(
     : null;
 }
 
-function matchesFilter(operation: Operation, filter: string): boolean {
+function matchesFilter(operation: OperationSummary, filter: string): boolean {
   return filter === "all" || operation.status === filter;
 }

@@ -32,6 +32,25 @@ export type CodexApprovalPolicy =
 export type CodexApprovalsReviewer =
   "user" | "auto_review" | "guardian_subagent";
 
+const APPROVAL_POLICY_MODES = ["untrusted", "on-request", "never"] as const;
+const APPROVALS_REVIEWERS = [
+  "user",
+  "auto_review",
+  "guardian_subagent",
+] as const satisfies readonly CodexApprovalsReviewer[];
+
+export function isApprovalPolicyMode(
+  value: unknown,
+): value is Exclude<CodexApprovalPolicy, { granular: unknown }> {
+  return APPROVAL_POLICY_MODES.some((mode) => mode === value);
+}
+
+export function isApprovalsReviewer(
+  value: unknown,
+): value is CodexApprovalsReviewer {
+  return APPROVALS_REVIEWERS.some((reviewer) => reviewer === value);
+}
+
 export type CodexSandboxMode =
   "read-only" | "workspace-write" | "danger-full-access";
 
@@ -360,6 +379,21 @@ export interface AgentHistory {
     turn: AgentTurn;
     items: AgentItem[];
   }>;
+}
+
+export interface AgentHistoryPageQuery {
+  /** Maximum number of turns to return. */
+  limit: number;
+  /** Return turns strictly before this turn (older page). */
+  beforeTurnId: string | null;
+  /** Return turns strictly after this turn (newer turns since a read). */
+  afterTurnId: string | null;
+}
+
+export interface AgentHistoryPage extends AgentHistory {
+  totalTurns: number;
+  hasEarlierTurns: boolean;
+  hasLaterTurns: boolean;
 }
 
 export interface AgentHistoryUpdate {

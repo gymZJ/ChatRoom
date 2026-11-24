@@ -3,6 +3,7 @@ import type {
   Operation,
   OperationStart,
   OperationStatus,
+  OperationSummary,
 } from "#core/operations/types";
 import { boundJson } from "#core/operations/bounded-value";
 import { SecretRedactor } from "#core/operations/redactor";
@@ -13,13 +14,25 @@ import type {
 } from "#core/operations/repository";
 import type { RuntimeEventBus } from "#app/event-bus";
 
+export interface OperationRetention {
+  /** Finished operations older than this are deleted. */
+  maxAgeDays: number;
+  /** At most this many finished operations are kept. */
+  maxEntries: number;
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const RETENTION_INTERVAL_MS = 60 * 60 * 1000;
+
 export class OperationLog {
   private readonly redactor = new SecretRedactor();
+  private retentionTimer: NodeJS.Timeout | null = null;
 
   constructor(
     private readonly repository: OperationRepository,
     private readonly eventBus: RuntimeEventBus,
     private readonly maxPayloadBytes: number,
+    private readonly retention: OperationRetention | null = null,
   ) {}
 
   start(request: OperationStart): Operation {
@@ -105,6 +118,11 @@ export class OperationLog {
     return this.repository.list(query);
   }
 
+  /** Lists operation metadata without loading recorded payloads. */
+  listSummaries(query?: OperationQuery): OperationSummary[] {
+    return this.repository.listSummaries(query);
+  }
+
   get(operationId: string): Operation | null {
     return this.repository.get(operationId);
   }
@@ -133,6 +151,41 @@ export class OperationLog {
 
   reconcileInterrupted(): number {
     return this.repository.reconcileRunning(new Date().toISOString());
+  }
+
+  /**
+   * Applies the retention policy; returns the number of deleted entries.
+   * No event is emitted: pruned entries are old, and "operations-cleared"
+   * would reset what an open Operations view has selected.
+   */
+  prune(now = new Date()): number {
+    if (!this.retention) return 0;
+    return this.repository.prune({
+      startedBefore: new Date(
+        now.getTime() - this.retention.maxAgeDays * DAY_MS,
+      ).toISOString(),
+      keepLatest: this.retention.maxEntries,
+    });
+  }
+
+  /** Prunes now and then hourly until {@link stopRetention}. */
+  startRetention(): number {
+    this.stopRetention();
+    if (!this.retention) return 0;
+    this.retentionTimer = setInterval(() => {
+      try {
+        this.prune();
+      } catch {
+        // Retention is best effort; the next interval retries.
+      }
+    }, RETENTION_INTERVAL_MS);
+    this.retentionTimer.unref();
+    return this.prune();
+  }
+
+  stopRetention(): void {
+    if (this.retentionTimer) clearInterval(this.retentionTimer);
+    this.retentionTimer = null;
   }
 
   private require(operationId: string): Operation {

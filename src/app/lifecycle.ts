@@ -6,12 +6,14 @@ import {
   createApplication,
   type ApplicationComponents,
 } from "./application.js";
+import { startMemoryWatch } from "./memory-watch.js";
 
 export class ApplicationLifecycle {
   private components: ApplicationComponents | null = null;
   private starting: Promise<ApplicationComponents> | null = null;
   private shuttingDown: Promise<void> | null = null;
   private readonly logs: SystemLog;
+  private stopMemoryWatch: (() => void) | null = null;
 
   constructor(private readonly config: ChatRoomConfig) {
     this.logs = new SystemLog(new FileLogStore(config.dataDir));
@@ -41,6 +43,7 @@ export class ApplicationLifecycle {
       await components.http.start();
       await components.cloud.start();
       this.components = components;
+      this.stopMemoryWatch ??= startMemoryWatch(this.logs);
       this.logs.info("app", "app.started", "ChatRoom started", {
         version: CHATROOM_VERSION,
       });
@@ -88,6 +91,8 @@ export class ApplicationLifecycle {
     const components = this.components;
     if (!components) return;
     this.components = null;
+    this.stopMemoryWatch?.();
+    this.stopMemoryWatch = null;
     this.logs.info("app", "app.stopping", "ChatRoom is stopping");
     try {
       await cleanupComponents(components);
@@ -138,6 +143,7 @@ async function cleanupComponents(
     errors.push(error);
   }
   try {
+    components.operations.stopRetention();
     components.database.close();
   } catch (error) {
     errors.push(error);

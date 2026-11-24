@@ -1,15 +1,15 @@
 <script setup lang="ts">
 import { useLocale } from "vuetify";
-import type { Operation } from "../api.js";
+import type { OperationSummary } from "../api.js";
 import { useOperationLabels } from "../composables/useOperationLabels.js";
 import { clock, duration } from "../utils.js";
 import StateChip from "./StateChip.vue";
 
 defineProps<{
-  events: Operation[];
+  events: OperationSummary[];
   selected?: string | null;
 }>();
-defineEmits<{ select: [event: Operation] }>();
+defineEmits<{ select: [event: OperationSummary] }>();
 const locale = useLocale();
 
 const { actionLabel, sourceLabel } = useOperationLabels();

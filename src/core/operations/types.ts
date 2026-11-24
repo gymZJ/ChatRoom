@@ -26,6 +26,9 @@ export interface Operation {
   durationMs: number | null;
 }
 
+/** Operation metadata without the recorded input, output and error payloads. */
+export type OperationSummary = Omit<Operation, "input" | "output" | "error">;
+
 export interface OperationStart {
   pluginId: string;
   source: OperationSource;

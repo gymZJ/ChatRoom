@@ -29,6 +29,7 @@ export type {
   GitDiff,
   GitStatus,
   Operation,
+  OperationSummary,
   ProcessSnapshot,
   ProcessSummary,
   LogLevel,

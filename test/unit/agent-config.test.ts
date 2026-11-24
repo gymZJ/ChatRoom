@@ -53,3 +53,70 @@ test("Agent forms map only advertised native permissions and reset incompatible 
     await codex.close();
   }
 });
+
+test("native settings are filled and validated from each provider's declaration", async () => {
+  const { applyNativeSettings, emptyAgentSessionConfig } =
+    await import("../../src/plugins/agent/runtime-config.js");
+  const { ClaudeCodeProvider } =
+    await import("../../src/plugins/agent/providers/claude/provider.js");
+  const logs = { debug() {}, info() {}, warn() {}, error() {} };
+  const codex = new CodexProvider(logs);
+  const claude = new ClaudeCodeProvider(logs);
+  try {
+    assert.deepEqual(applyNativeSettings(codex, emptyAgentSessionConfig()), {
+      ...emptyAgentSessionConfig(),
+      approvalPolicy: "on-request",
+      approvalsReviewer: "user",
+      permissionMode: "workspace-write",
+    });
+    assert.deepEqual(applyNativeSettings(claude, emptyAgentSessionConfig()), {
+      ...emptyAgentSessionConfig(),
+      permissionMode: "default",
+    });
+    const granular = {
+      granular: {
+        sandbox_approval: true,
+        rules: false,
+        skill_approval: true,
+        request_permissions: true,
+        mcp_elicitations: false,
+      },
+    };
+    assert.deepEqual(
+      applyNativeSettings(codex, {
+        ...emptyAgentSessionConfig(),
+        approvalPolicy: granular,
+      }).approvalPolicy,
+      granular,
+    );
+    assert.throws(
+      () =>
+        applyNativeSettings(codex, {
+          ...emptyAgentSessionConfig(),
+          approvalPolicy: {
+            granular: { ...granular.granular, unknown: true },
+          } as never,
+        }),
+      /Unsupported approvalPolicy for codex/,
+    );
+    assert.throws(
+      () =>
+        applyNativeSettings(claude, {
+          ...emptyAgentSessionConfig(),
+          approvalPolicy: "never",
+        }),
+      /claude does not support approvalPolicy/,
+    );
+    assert.throws(
+      () =>
+        applyNativeSettings(claude, {
+          ...emptyAgentSessionConfig(),
+          permissionMode: "workspace-write",
+        }),
+      /Unsupported permissionMode for claude/,
+    );
+  } finally {
+    await codex.close();
+    await claude.close();
+  }
+});

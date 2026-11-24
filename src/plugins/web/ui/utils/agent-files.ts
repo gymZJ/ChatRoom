@@ -1,3 +1,34 @@
+/** Document and source types the composer accepts as local uploads. */
+export const AGENT_UPLOAD_FILE_TYPES: readonly string[] = [
+  ".txt",
+  ".md",
+  ".json",
+  ".csv",
+  ".pdf",
+  ".doc",
+  ".docx",
+  ".xls",
+  ".xlsx",
+  ".zip",
+  ".yaml",
+  ".yml",
+  ".xml",
+  ".html",
+  ".css",
+  ".js",
+  ".ts",
+  ".py",
+  ".rs",
+  ".go",
+  ".java",
+  ".c",
+  ".cpp",
+  ".sh",
+  ".log",
+  ".toml",
+  ".sql",
+];
+
 export interface IndexedProjectFile {
   path: string;
   lowerPath: string;
@@ -41,39 +72,53 @@ export function filterProjectFiles(
     .map((entry) => entry.path);
 }
 
+/**
+ * Flattens paths into tree rows in display order: depth-first, and within
+ * each directory subdirectories before files, each sorted by name.
+ */
 export function buildProjectTree(paths: readonly string[]): ProjectTreeRow[] {
-  const entries = new Map<string, "file" | "directory">();
+  interface Node {
+    children: Map<string, Node>;
+  }
+  const root: Node = { children: new Map() };
   for (const filePath of paths) {
-    const parts = filePath.split("/");
-    for (let index = 1; index < parts.length; index += 1)
-      entries.set(parts.slice(0, index).join("/"), "directory");
-    entries.set(filePath, "file");
+    let node = root;
+    for (const segment of filePath.split("/")) {
+      let child = node.children.get(segment);
+      if (!child) {
+        child = { children: new Map() };
+        node.children.set(segment, child);
+      }
+      node = child;
+    }
   }
 
-  return [...entries]
-    .map(([path, type]) => {
-      const parts = path.split("/");
-      const ancestors: string[] = [];
-      let parent = "";
-      for (const segment of parts.slice(0, -1)) {
-        parent = parent ? parent + "/" + segment : segment;
-        ancestors.push(parent);
-      }
-      return {
+  const rows: ProjectTreeRow[] = [];
+  const visit = (node: Node, prefix: string, ancestors: string[]) => {
+    const entries = [...node.children].map(([name, child]) => ({
+      name,
+      child,
+      directory: child.children.size > 0,
+    }));
+    entries.sort(
+      (left, right) =>
+        Number(right.directory) - Number(left.directory) ||
+        left.name.localeCompare(right.name),
+    );
+    for (const { name, child, directory } of entries) {
+      const path = prefix ? prefix + "/" + name : name;
+      rows.push({
         path,
-        name: parts.at(-1) ?? path,
-        type,
-        depth: Math.max(0, parts.length - 1),
+        name,
+        type: directory ? "directory" : "file",
+        depth: ancestors.length,
         ancestors,
-      };
-    })
-    .sort((left, right) => {
-      const leftParent = left.ancestors.at(-1) ?? "";
-      const rightParent = right.ancestors.at(-1) ?? "";
-      if (leftParent === rightParent && left.type !== right.type)
-        return left.type === "directory" ? -1 : 1;
-      return left.path.localeCompare(right.path);
-    });
+      });
+      if (directory) visit(child, path, [...ancestors, path]);
+    }
+  };
+  visit(root, "", []);
+  return rows;
 }
 
 export function extractMentionedPaths(

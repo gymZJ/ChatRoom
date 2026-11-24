@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ChatRoomError } from "#core/errors/chatroom-error";
 import type { PluginMcpRegistrar } from "#mcp/server/plugin-mcp-registrar";
 import {
   closedRead,
@@ -9,6 +10,7 @@ import type { AgentRuntime } from "./runtime.js";
 import {
   AGENT_PROVIDER_ID_PATTERN,
   AGENT_PERMISSION_MODES,
+  type AgentHistoryPage,
   type AgentSessionConfig,
 } from "./types.js";
 
@@ -557,8 +559,29 @@ export function registerAgentTools(
     {
       title: "Read Agent history",
       description:
-        "Read one Agent conversation including human/MCP source, tool activity, file changes, artifacts, reasoning summaries, plans, and pending interactions with their offered approvalOptions.",
-      inputSchema: z.object({ sessionId: z.string().min(1) }),
+        "Read one Agent conversation including human/MCP source, tool activity, file changes, artifacts, reasoning summaries, plans, and pending interactions with their offered approvalOptions. Returns the newest `limit` turns (default 20). Page backward with beforeTurnId set to the first returned turn id while hasEarlierTurns is true; fetch only newer turns with afterTurnId set to the last turn you have read.",
+      inputSchema: z.object({
+        sessionId: z.string().min(1),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(200)
+          .default(20)
+          .describe("Maximum number of turns to return."),
+        beforeTurnId: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("Return turns before this turn id (older page)."),
+        afterTurnId: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            "Return turns after this turn id (newer turns since a previous read).",
+          ),
+      }),
       outputSchema: z.object({
         session,
         turns: z.array(
@@ -567,11 +590,43 @@ export function registerAgentTools(
             items: z.array(item),
           }),
         ),
+        totalTurns: z.number().int().nonnegative(),
+        hasEarlierTurns: z.boolean(),
+        hasLaterTurns: z.boolean(),
       }),
       annotations: closedRead,
       action: "history",
+      // The conversation itself is stored in the Agent tables; repeating it in
+      // the operation log on every read only bloats the database.
+      audit: {
+        output: (value) => {
+          const history = value as AgentHistoryPage;
+          return {
+            sessionId: history.session.id,
+            provider: history.session.provider,
+            status: history.session.status,
+            turns: history.turns.map(({ turn }) => turn.id),
+            totalTurns: history.totalTurns,
+            items: history.turns.reduce(
+              (count, entry) => count + entry.items.length,
+              0,
+            ),
+          };
+        },
+      },
     },
-    ({ sessionId }) => agents.history(sessionId),
+    ({ sessionId, limit, beforeTurnId, afterTurnId }) => {
+      if (beforeTurnId && afterTurnId)
+        throw new ChatRoomError(
+          "INVALID_INPUT",
+          "Use either beforeTurnId or afterTurnId, not both",
+        );
+      return agents.historyPage(sessionId, {
+        limit,
+        beforeTurnId: beforeTurnId ?? null,
+        afterTurnId: afterTurnId ?? null,
+      });
+    },
   );
 
   mcp.registerTool(

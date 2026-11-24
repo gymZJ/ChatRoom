@@ -89,6 +89,8 @@ interface ModelListResponse {
 }
 
 type SessionConfig = Parameters<ProviderSession["configure"]>[0];
+
+const MODEL_CACHE_MS = 60_000;
 type ApprovalChoice = AgentInteractionOption & { result: unknown };
 
 function codexSandbox(
@@ -191,6 +193,10 @@ export class CodexProvider implements AgentProvider {
   ] as const;
   private readonly client: CodexRpcClient;
   private readonly modelNames = new Map<string, string>();
+  private modelCache: {
+    value: Promise<AgentModel[]>;
+    expiresAt: number;
+  } | null = null;
 
   constructor(
     private readonly logs: LogWriter,
@@ -256,7 +262,23 @@ export class CodexProvider implements AgentProvider {
     };
   }
 
-  async listModels(): Promise<AgentModel[]> {
+  /**
+   * The runtime consults the catalog on every send and settings change, so
+   * concurrent and repeated reads within a minute share one model/list.
+   */
+  listModels(): Promise<AgentModel[]> {
+    const cached = this.modelCache;
+    if (cached && cached.expiresAt > Date.now()) return cached.value;
+    const value = this.fetchModels();
+    const entry = { value, expiresAt: Date.now() + MODEL_CACHE_MS };
+    this.modelCache = entry;
+    value.catch(() => {
+      if (this.modelCache === entry) this.modelCache = null;
+    });
+    return value;
+  }
+
+  private async fetchModels(): Promise<AgentModel[]> {
     const output: AgentModel[] = [];
     let cursor: string | null = null;
     do {

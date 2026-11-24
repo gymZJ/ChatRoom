@@ -11,7 +11,8 @@ import type {
 } from "./provider.js";
 import type { AgentStore } from "./store.js";
 import {
-  approvalPolicySupported,
+  resolveSessionConfig,
+  validateInputModalities,
   copyAgentSessionConfig,
   emptyAgentSessionConfig,
   validateReviewTarget,
@@ -29,13 +30,20 @@ import {
   materializeProviderItem,
   mergeContinuityContext,
   nextSessionUpdatedAt,
+  pageAgentHistory,
   structuredError,
 } from "./runtime-state.js";
-import { isAgentProviderId, isAgentPermissionMode } from "./types.js";
+import {
+  AgentInvalidationBatcher,
+  type AgentInvalidation,
+} from "./runtime-invalidation.js";
+import { isAgentProviderId } from "./types.js";
 import type {
   AgentError,
   AgentSessionConfig,
   AgentHistory,
+  AgentHistoryPage,
+  AgentHistoryPageQuery,
   AgentHistoryUpdate,
   AgentInteractionResponse,
   AgentItem,
@@ -62,37 +70,19 @@ interface ActiveTurn {
   nextSequence: number;
 }
 
-interface AgentInvalidation {
-  turnIds?: readonly string[];
-  itemIds?: readonly string[];
-  deleted?: boolean;
-}
-
-interface PendingAgentInvalidation {
-  timer: ReturnType<typeof setTimeout>;
-  turnIds: Set<string>;
-  itemIds: Set<string>;
-  persistedItems: Map<string, AgentItem>;
-  deleted: boolean;
-}
-
 const AGENT_COMMAND_OUTPUT_LIMIT_BYTES = 512 * 1024;
 
 export class AgentRuntime {
   private readonly providerSessions = new Map<string, ProviderSession>();
   private readonly activeTurns = new Map<string, ActiveTurn>();
   private readonly sessionMutations = new Set<string>();
-  private readonly deltaInvalidations = new Map<
-    string,
-    PendingAgentInvalidation
-  >();
-  private closed = false;
+  private readonly invalidations: AgentInvalidationBatcher;
   private readonly providers: Map<AgentProviderId, AgentProvider>;
 
   constructor(
     private readonly store: AgentStore,
     private readonly workspaces: WorkspaceAccess,
-    private readonly events: RuntimeEventBus,
+    events: RuntimeEventBus,
     providers: AgentProvider[],
   ) {
     this.providers = new Map();
@@ -103,6 +93,11 @@ export class AgentRuntime {
         throw new Error("Duplicate Agent provider id: " + provider.id);
       this.providers.set(provider.id, provider);
     }
+    this.invalidations = new AgentInvalidationBatcher(
+      store,
+      events,
+      (sessionId, error) => this.failActiveTurn(sessionId, error),
+    );
     this.store.reconcileInterrupted(new Date().toISOString());
   }
 
@@ -154,7 +149,7 @@ export class AgentRuntime {
   }
 
   history(sessionId: string): AgentHistory {
-    this.persistPendingSession(sessionId);
+    this.invalidations.persistPending(sessionId);
     const history = this.store.history(sessionId);
     if (!history)
       throw new ChatRoomError(
@@ -164,12 +159,19 @@ export class AgentRuntime {
     return history;
   }
 
+  historyPage(
+    sessionId: string,
+    query: AgentHistoryPageQuery,
+  ): AgentHistoryPage {
+    return pageAgentHistory(this.history(sessionId), query);
+  }
+
   historyUpdate(
     sessionId: string,
     turnIds: readonly string[],
     itemIds: readonly string[],
   ): AgentHistoryUpdate {
-    this.persistPendingSession(sessionId);
+    this.invalidations.persistPending(sessionId);
     const update = this.store.historyUpdate(sessionId, turnIds, itemIds);
     if (!update)
       throw new ChatRoomError(
@@ -195,7 +197,7 @@ export class AgentRuntime {
         input.provider + " is not authenticated",
         providerStatus.error ? { error: providerStatus.error } : undefined,
       );
-    const config = await this.validateConfig(
+    const config = await resolveSessionConfig(
       provider,
       emptyAgentSessionConfig(),
       input,
@@ -234,7 +236,7 @@ export class AgentRuntime {
       updatedAt: now,
     });
     this.providerSessions.set(session.id, providerSession);
-    this.invalidateSession(session.id);
+    this.invalidations.invalidate(session.id);
     return session;
   }
 
@@ -268,7 +270,12 @@ export class AgentRuntime {
       workspaceRoot,
       input.attachments,
     );
-    await this.validateInputModalities(session, text, attachments);
+    await validateInputModalities(
+      this.requireProvider(session.provider),
+      session.model,
+      text,
+      attachments,
+    );
     const providerSession = await this.providerSession(session);
     const active = this.beginTurn(
       session,
@@ -344,7 +351,12 @@ export class AgentRuntime {
         workspaceRoot,
         input.attachments,
       );
-      await this.validateInputModalities(session, text, attachments);
+      await validateInputModalities(
+        this.requireProvider(session.provider),
+        session.model,
+        text,
+        attachments,
+      );
       if (this.activeTurns.get(sessionId) !== active)
         throw new ChatRoomError("CONFLICT", "Agent turn ended before steering");
       const provider = this.requireProvider(session.provider);
@@ -375,7 +387,7 @@ export class AgentRuntime {
         updatedAt: now,
       };
       this.store.insertItem(item);
-      this.invalidateSession(sessionId, {
+      this.invalidations.invalidate(sessionId, {
         turnIds: [active.turn.id],
         itemIds: [item.id],
       });
@@ -456,7 +468,7 @@ export class AgentRuntime {
         "CONFLICT",
         "Cannot configure an active Agent session",
       );
-    const config = await this.validateConfig(
+    const config = await resolveSessionConfig(
       this.requireProvider(session.provider),
       copyAgentSessionConfig(session),
       patch,
@@ -479,161 +491,8 @@ export class AgentRuntime {
       updatedAt: updated.updatedAt,
     });
     this.store.updateSession(updated);
-    this.invalidateSession(sessionId);
+    this.invalidations.invalidate(sessionId);
     return updated;
-  }
-
-  private async validateConfig(
-    provider: AgentProvider,
-    current: AgentSessionConfig,
-    patch: Partial<AgentSessionConfig>,
-  ): Promise<AgentSessionConfig> {
-    const config = { ...current };
-    for (const key of [
-      "model",
-      "reasoningEffort",
-      "reasoningSummary",
-      "serviceTier",
-      "approvalPolicy",
-      "approvalsReviewer",
-      "permissionMode",
-    ] as const) {
-      if (patch[key] !== undefined)
-        Object.assign(config, { [key]: patch[key] });
-    }
-    const approvalPolicySetting = provider.nativeSettings.find(
-      (setting) => setting.id === "approvalPolicy",
-    );
-    const approvalsReviewerSetting = provider.nativeSettings.find(
-      (setting) => setting.id === "approvalsReviewer",
-    );
-    const permissionModeSetting = provider.nativeSettings.find(
-      (setting) => setting.id === "permissionMode",
-    );
-
-    if (approvalPolicySetting) {
-      config.approvalPolicy ??=
-        approvalPolicySetting.defaultValue === "untrusted" ||
-        approvalPolicySetting.defaultValue === "on-request" ||
-        approvalPolicySetting.defaultValue === "never"
-          ? approvalPolicySetting.defaultValue
-          : "on-request";
-      if (
-        !approvalPolicySupported(config.approvalPolicy, approvalPolicySetting)
-      )
-        throw new ChatRoomError(
-          "INVALID_INPUT",
-          "Unsupported approvalPolicy for " + provider.id,
-        );
-    } else if (config.approvalPolicy !== null) {
-      throw new ChatRoomError(
-        "INVALID_INPUT",
-        provider.id + " does not support approvalPolicy",
-      );
-    }
-
-    if (approvalsReviewerSetting) {
-      config.approvalsReviewer ??=
-        approvalsReviewerSetting.defaultValue === "auto_review" ||
-        approvalsReviewerSetting.defaultValue === "guardian_subagent"
-          ? approvalsReviewerSetting.defaultValue
-          : "user";
-      if (
-        !approvalsReviewerSetting.options.some(
-          (option) => option.id === config.approvalsReviewer,
-        )
-      )
-        throw new ChatRoomError(
-          "INVALID_INPUT",
-          "Unsupported approvalsReviewer for " + provider.id,
-        );
-    } else if (config.approvalsReviewer !== null) {
-      throw new ChatRoomError(
-        "INVALID_INPUT",
-        provider.id + " does not support approvalsReviewer",
-      );
-    }
-
-    if (permissionModeSetting) {
-      config.permissionMode ??= isAgentPermissionMode(
-        permissionModeSetting.defaultValue,
-      )
-        ? permissionModeSetting.defaultValue
-        : "workspace-write";
-      if (
-        !permissionModeSetting.options.some(
-          (option) => option.id === config.permissionMode,
-        )
-      )
-        throw new ChatRoomError(
-          "INVALID_INPUT",
-          "Unsupported permissionMode for " + provider.id,
-        );
-    } else if (config.permissionMode !== null) {
-      throw new ChatRoomError(
-        "INVALID_INPUT",
-        provider.id + " does not support permissionMode",
-      );
-    }
-
-    const models = await provider.listModels();
-    const model =
-      config.model === null
-        ? (models.find((candidate) => candidate.isDefault) ?? models[0])
-        : models.find((candidate) => candidate.id === config.model);
-    if (config.model !== null && !model)
-      throw new ChatRoomError(
-        "INVALID_INPUT",
-        "Unknown model for " + provider.id + ": " + config.model,
-      );
-    const supportsEffort = (value: string | null) =>
-      value === null ||
-      !!model?.reasoningEfforts.some((effort) => effort.id === value);
-    const supportsTier = (value: string | null) =>
-      value === null || !!model?.serviceTiers.some((tier) => tier.id === value);
-    if (config.model !== current.model) {
-      if (
-        patch.reasoningEffort === undefined &&
-        !supportsEffort(config.reasoningEffort)
-      )
-        config.reasoningEffort = supportsEffort(
-          model?.defaultReasoningEffort ?? null,
-        )
-          ? (model?.defaultReasoningEffort ?? null)
-          : null;
-      if (patch.serviceTier === undefined && !supportsTier(config.serviceTier))
-        config.serviceTier = supportsTier(model?.defaultServiceTier ?? null)
-          ? (model?.defaultServiceTier ?? null)
-          : null;
-      if (
-        patch.reasoningSummary === undefined &&
-        !model?.reasoningSummaries.includes(config.reasoningSummary ?? "none")
-      )
-        config.reasoningSummary =
-          model?.defaultReasoningSummary &&
-          model.reasoningSummaries.includes(model.defaultReasoningSummary)
-            ? model.defaultReasoningSummary
-            : null;
-    }
-    if (!supportsEffort(config.reasoningEffort))
-      throw new ChatRoomError(
-        "INVALID_INPUT",
-        "Unsupported reasoning effort: " + config.reasoningEffort,
-      );
-    if (!supportsTier(config.serviceTier))
-      throw new ChatRoomError(
-        "INVALID_INPUT",
-        "Unsupported service tier: " + config.serviceTier,
-      );
-    if (
-      config.reasoningSummary !== null &&
-      !model?.reasoningSummaries.includes(config.reasoningSummary)
-    )
-      throw new ChatRoomError(
-        "INVALID_INPUT",
-        "Unsupported reasoning summary: " + config.reasoningSummary,
-      );
-    return config;
   }
 
   async interrupt(sessionId: string): Promise<void> {
@@ -706,7 +565,7 @@ export class AgentRuntime {
       updatedAt: new Date().toISOString(),
     };
     active.items.set(item.providerItemId ?? item.id, updated);
-    this.persistItem(sessionId, updated);
+    this.invalidations.persistItem(sessionId, updated);
     if (this.activeTurns.get(sessionId) === active)
       this.updateSessionStatus(
         this.requireSession(sessionId),
@@ -717,7 +576,7 @@ export class AgentRuntime {
         },
       );
     else
-      this.invalidateSession(sessionId, {
+      this.invalidations.invalidate(sessionId, {
         turnIds: [active.turn.id],
         itemIds: [updated.id],
       });
@@ -789,7 +648,7 @@ export class AgentRuntime {
         .catch(() => null),
     );
     this.store.deleteSession(sessionId);
-    this.invalidateSession(sessionId, { deleted: true });
+    this.invalidations.invalidate(sessionId, { deleted: true });
   }
 
   async switchProvider(
@@ -837,7 +696,7 @@ export class AgentRuntime {
       sessionId,
       targetProvider,
     );
-    const config = await this.validateConfig(
+    const config = await resolveSessionConfig(
       provider,
       existingState
         ? copyAgentSessionConfig(existingState)
@@ -908,17 +767,12 @@ export class AgentRuntime {
       updatedAt: nextSessionUpdatedAt(session.updatedAt),
     };
     this.store.updateSession(updated);
-    this.invalidateSession(updated.id);
+    this.invalidations.invalidate(updated.id);
     return updated;
   }
 
   async close(): Promise<void> {
-    this.closed = true;
-    for (const pending of this.deltaInvalidations.values()) {
-      clearTimeout(pending.timer);
-      this.persistPendingItems(pending);
-    }
-    this.deltaInvalidations.clear();
+    this.invalidations.close();
     for (const active of this.activeTurns.values())
       await active.providerSession.interrupt().catch(() => undefined);
     this.activeTurns.clear();
@@ -959,7 +813,7 @@ export class AgentRuntime {
         providerTurnId: event.providerTurnId,
       };
       this.store.updateTurn(active.turn);
-      this.invalidateSession(session.id, { turnIds: [active.turn.id] });
+      this.invalidations.invalidate(session.id, { turnIds: [active.turn.id] });
       return;
     }
 
@@ -980,7 +834,7 @@ export class AgentRuntime {
       );
       active.items.set(event.providerItemId, item);
       this.store.insertItem(item);
-      this.invalidateSession(session.id, {
+      this.invalidations.invalidate(session.id, {
         turnIds: [active.turn.id],
         itemIds: [item.id],
       });
@@ -1000,7 +854,7 @@ export class AgentRuntime {
             )
           : applyItemDelta(item, event.field, event.delta);
       active.items.set(event.providerItemId, updated);
-      this.scheduleDeltaInvalidation(
+      this.invalidations.schedule(
         session.id,
         {
           turnIds: [active.turn.id],
@@ -1032,9 +886,9 @@ export class AgentRuntime {
         updated,
       );
       active.items.set(event.providerItemId, bounded);
-      if (existing) this.persistItem(session.id, bounded);
+      if (existing) this.invalidations.persistItem(session.id, bounded);
       else this.store.insertItem(bounded);
-      this.invalidateSession(session.id, {
+      this.invalidations.invalidate(session.id, {
         turnIds: [active.turn.id],
         itemIds: [bounded.id],
       });
@@ -1057,7 +911,7 @@ export class AgentRuntime {
       this.store.updateSession(session);
       active.turn = { ...active.turn, usage: event.usage.last };
       this.store.updateTurn(active.turn);
-      this.scheduleDeltaInvalidation(session.id, {
+      this.invalidations.schedule(session.id, {
         turnIds: [active.turn.id],
       });
       return;
@@ -1080,7 +934,7 @@ export class AgentRuntime {
       );
       active.items.set(id, notice);
       this.store.insertItem(notice);
-      this.invalidateSession(session.id, {
+      this.invalidations.invalidate(session.id, {
         turnIds: [active.turn.id],
         itemIds: [notice.id],
       });
@@ -1108,9 +962,9 @@ export class AgentRuntime {
         completed,
       );
       active.items.set(event.providerItemId, bounded);
-      if (existing) this.persistItem(session.id, bounded);
+      if (existing) this.invalidations.persistItem(session.id, bounded);
       else this.store.insertItem(bounded);
-      this.invalidateSession(session.id, {
+      this.invalidations.invalidate(session.id, {
         turnIds: [active.turn.id],
         itemIds: [bounded.id],
       });
@@ -1134,7 +988,7 @@ export class AgentRuntime {
           updatedAt: new Date().toISOString(),
         };
         active.items.set(item.providerItemId ?? item.id, updated);
-        this.persistItem(session.id, updated);
+        this.invalidations.persistItem(session.id, updated);
       }
       this.updateSessionStatus(
         session,
@@ -1185,7 +1039,7 @@ export class AgentRuntime {
         updatedAt: now,
       };
       active.items.set(key, updated);
-      this.persistItem(session.id, updated);
+      this.invalidations.persistItem(session.id, updated);
       changedItemIds.push(updated.id);
     }
     active.turn = {
@@ -1269,7 +1123,7 @@ export class AgentRuntime {
     };
     Object.assign(session, updated);
     this.store.updateSession(updated);
-    this.invalidateSession(updated.id, change);
+    this.invalidations.invalidate(updated.id, change);
     return updated;
   }
 
@@ -1320,104 +1174,6 @@ export class AgentRuntime {
     }
   }
 
-  private async validateInputModalities(
-    session: AgentSession,
-    text: string,
-    attachments: AgentTurnInput["attachments"],
-  ): Promise<void> {
-    const models = await this.requireProvider(session.provider).listModels();
-    const model =
-      session.model === null
-        ? (models.find((candidate) => candidate.isDefault) ?? models[0])
-        : models.find((candidate) => candidate.id === session.model);
-    if (!model) return;
-    if (
-      (text ||
-        attachments.some(
-          (attachment) =>
-            attachment.kind === "file" || attachment.kind === "skill",
-        )) &&
-      !model.inputModalities.includes("text")
-    )
-      throw new ChatRoomError(
-        "INVALID_INPUT",
-        "Selected model does not support text input",
-      );
-    if (
-      attachments.some((attachment) => attachment.kind === "image") &&
-      !model.inputModalities.includes("image")
-    )
-      throw new ChatRoomError(
-        "INVALID_INPUT",
-        "Selected model does not support image input",
-      );
-    if (
-      attachments.some((attachment) => attachment.kind === "audio") &&
-      !model.inputModalities.includes("audio")
-    )
-      throw new ChatRoomError(
-        "INVALID_INPUT",
-        "Selected model does not support audio input",
-      );
-  }
-
-  private scheduleDeltaInvalidation(
-    sessionId: string,
-    change: AgentInvalidation = {},
-    persistedItem?: AgentItem,
-  ): void {
-    if (this.closed) return;
-    const existing = this.deltaInvalidations.get(sessionId);
-    if (existing) {
-      mergeInvalidation(existing, change);
-      if (persistedItem)
-        existing.persistedItems.set(persistedItem.id, persistedItem);
-      return;
-    }
-    const pending: PendingAgentInvalidation = {
-      timer: setTimeout(() => {
-        try {
-          this.flushDeltaInvalidation(sessionId);
-        } catch (error) {
-          this.failActiveTurn(sessionId, error);
-        }
-      }, 150),
-      turnIds: new Set(change.turnIds ?? []),
-      itemIds: new Set(change.itemIds ?? []),
-      persistedItems: new Map(
-        persistedItem ? [[persistedItem.id, persistedItem]] : [],
-      ),
-      deleted: Boolean(change.deleted),
-    };
-    pending.timer.unref();
-    this.deltaInvalidations.set(sessionId, pending);
-  }
-
-  private flushDeltaInvalidation(sessionId: string): void {
-    const pending = this.deltaInvalidations.get(sessionId);
-    if (!pending) return;
-    this.deltaInvalidations.delete(sessionId);
-    this.persistPendingItems(pending);
-    if (this.closed) return;
-    this.events.emit({
-      type: "agent",
-      sessionId,
-      ...(pending.turnIds.size ? { turnIds: [...pending.turnIds] } : {}),
-      ...(pending.itemIds.size ? { itemIds: [...pending.itemIds] } : {}),
-      ...(pending.deleted ? { deleted: true } : {}),
-    });
-  }
-
-  private persistItem(sessionId: string, item: AgentItem): void {
-    this.deltaInvalidations.get(sessionId)?.persistedItems.delete(item.id);
-    this.store.updateItem(item);
-  }
-
-  private persistPendingSession(sessionId: string): void {
-    const pending = this.deltaInvalidations.get(sessionId);
-    if (pending) this.persistPendingItems(pending);
-  }
-
   private failActiveTurn(sessionId: string, error: unknown): void {
     const active = this.activeTurns.get(sessionId);
     if (!active) return;
@@ -1428,14 +1184,6 @@ export class AgentRuntime {
     } catch {
       this.activeTurns.delete(sessionId);
     }
-  }
-
-  private persistPendingItems(
-    pending: Pick<PendingAgentInvalidation, "persistedItems">,
-  ): void {
-    for (const item of pending.persistedItems.values())
-      this.store.updateItem(item);
-    pending.persistedItems.clear();
   }
 
   private boundCommandOutput(
@@ -1472,39 +1220,4 @@ export class AgentRuntime {
       updatedAt: new Date().toISOString(),
     };
   }
-
-  private invalidateSession(
-    sessionId: string,
-    change: AgentInvalidation = {},
-  ): void {
-    const pending = this.deltaInvalidations.get(sessionId);
-    const turnIds = new Set(change.turnIds ?? []);
-    const itemIds = new Set(change.itemIds ?? []);
-    let deleted = Boolean(change.deleted);
-    if (pending) {
-      clearTimeout(pending.timer);
-      this.deltaInvalidations.delete(sessionId);
-      this.persistPendingItems(pending);
-      for (const id of pending.turnIds) turnIds.add(id);
-      for (const id of pending.itemIds) itemIds.add(id);
-      deleted ||= pending.deleted;
-    }
-    if (this.closed) return;
-    this.events.emit({
-      type: "agent",
-      sessionId,
-      ...(turnIds.size ? { turnIds: [...turnIds] } : {}),
-      ...(itemIds.size ? { itemIds: [...itemIds] } : {}),
-      ...(deleted ? { deleted: true } : {}),
-    });
-  }
-}
-
-function mergeInvalidation(
-  target: Pick<PendingAgentInvalidation, "turnIds" | "itemIds" | "deleted">,
-  change: AgentInvalidation,
-): void {
-  for (const id of change.turnIds ?? []) target.turnIds.add(id);
-  for (const id of change.itemIds ?? []) target.itemIds.add(id);
-  target.deleted ||= Boolean(change.deleted);
 }

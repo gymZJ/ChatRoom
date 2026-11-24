@@ -61,6 +61,18 @@ function rawConfigSchema() {
             .min(4096)
             .max(16 * 1024 * 1024)
             .default(defaults.operations.maxPayloadBytes),
+          retentionDays: z
+            .number()
+            .int()
+            .min(1)
+            .max(3650)
+            .default(defaults.operations.retentionDays),
+          maxEntries: z
+            .number()
+            .int()
+            .min(100)
+            .max(1_000_000)
+            .default(defaults.operations.maxEntries),
         })
         .strict()
         .default(defaults.operations),
@@ -109,7 +121,11 @@ export function defaultConfig(): ChatRoomConfig {
       webPublicBaseUrl: null,
       allowedRedirectHosts: ["chatgpt.com", "localhost", "127.0.0.1"],
     },
-    operations: { maxPayloadBytes: 512 * 1024 },
+    operations: {
+      maxPayloadBytes: 512 * 1024,
+      retentionDays: 30,
+      maxEntries: 10_000,
+    },
     process: {
       maxOutputBytes: 512 * 1024,
       defaultTimeoutMs: 30 * 60 * 1000,

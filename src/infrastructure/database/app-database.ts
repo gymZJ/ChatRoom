@@ -18,6 +18,25 @@ export class AppDatabase {
     }
   }
 
+  /**
+   * Rebuilds the file when most of it is free pages (e.g. after a large
+   * retention prune). SQLite reuses free pages but never shrinks the file.
+   */
+  compactIfSparse(minFreeBytes = 64 * 1024 * 1024): boolean {
+    const pragma = (name: string) =>
+      Number(
+        (this.raw.prepare(`PRAGMA ${name}`).get() as Record<string, unknown>)[
+          name
+        ],
+      );
+    const pageSize = pragma("page_size");
+    const pages = pragma("page_count");
+    const free = pragma("freelist_count");
+    if (free * pageSize < minFreeBytes || free * 2 < pages) return false;
+    this.raw.exec("VACUUM");
+    return true;
+  }
+
   close(): void {
     this.raw.close();
   }

@@ -7,7 +7,7 @@ import {
   shallowRef,
 } from "vue";
 import { useDisplay, useLocale } from "vuetify";
-import type { Operation } from "../api.js";
+import type { OperationSummary } from "../api.js";
 import { useOperations } from "../composables/useOperations.js";
 import { useMasterDetailFocus } from "../composables/useMasterDetailFocus.js";
 import type { OperationRefreshBatch } from "../composables/useRuntimeEvents.js";
@@ -81,7 +81,7 @@ async function continueLoadingIfVisible() {
     void operations.loadMore();
 }
 
-function select(event: Operation) {
+function select(event: OperationSummary) {
   operations.select(event);
   focusDetail();
 }

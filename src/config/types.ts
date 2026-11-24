@@ -15,6 +15,8 @@ export interface ChatRoomConfig {
   };
   operations: {
     maxPayloadBytes: number;
+    retentionDays: number;
+    maxEntries: number;
   };
   process: {
     maxOutputBytes: number;

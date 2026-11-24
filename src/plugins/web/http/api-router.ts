@@ -58,24 +58,28 @@ export function createApiRouter(
   router.use(createLogsApiRouter(logs));
 
   router.get("/operations", (req, res) => {
+    const query = {
+      limit: boundedIntegerQuery(req.query.limit, 100, 0, 500),
+      offset: boundedIntegerQuery(req.query.offset, 0, 0, 100000),
+      ...(typeof req.query.beforeStartedAt === "string" &&
+      typeof req.query.beforeOperationId === "string"
+        ? {
+            beforeStartedAt: req.query.beforeStartedAt,
+            beforeOperationId: req.query.beforeOperationId,
+          }
+        : {}),
+      ...(typeof req.query.pluginId === "string"
+        ? { pluginId: req.query.pluginId }
+        : {}),
+      ...(typeof req.query.status === "string"
+        ? { status: req.query.status }
+        : {}),
+    };
+    // Lists only need metadata; payloads can be hundreds of KB per entry.
     res.json(
-      application.operations.list({
-        limit: boundedIntegerQuery(req.query.limit, 100, 0, 500),
-        offset: boundedIntegerQuery(req.query.offset, 0, 0, 100000),
-        ...(typeof req.query.beforeStartedAt === "string" &&
-        typeof req.query.beforeOperationId === "string"
-          ? {
-              beforeStartedAt: req.query.beforeStartedAt,
-              beforeOperationId: req.query.beforeOperationId,
-            }
-          : {}),
-        ...(typeof req.query.pluginId === "string"
-          ? { pluginId: req.query.pluginId }
-          : {}),
-        ...(typeof req.query.status === "string"
-          ? { status: req.query.status }
-          : {}),
-      }),
+      req.query.view === "summary"
+        ? application.operations.listSummaries(query)
+        : application.operations.list(query),
     );
   });
   router.delete("/operations", (_req, res) => {
@@ -85,6 +89,16 @@ export function createApiRouter(
     const operationId = requireString(req.params.operationId, "operationId");
     const event = application.operations.get(operationId);
     if (!event) throw new ChatRoomError("NOT_FOUND", "Operation not found");
+    if (req.query.view === "summary") {
+      const {
+        input: _input,
+        output: _output,
+        error: _error,
+        ...summary
+      } = event;
+      res.json(summary);
+      return;
+    }
     res.json(event);
   });
 

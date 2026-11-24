@@ -1,8 +1,11 @@
 import { randomUUID } from "node:crypto";
+import { ChatRoomError } from "#core/errors/chatroom-error";
 import type { ProviderItem } from "./provider.js";
 import type {
   AgentError,
   AgentHistory,
+  AgentHistoryPage,
+  AgentHistoryPageQuery,
   AgentInputQuestion,
   AgentInteractionOption,
   AgentItem,
@@ -193,5 +196,39 @@ export function structuredError(error: unknown): AgentError {
         : runtimeErrorMessage(error),
     details: typeof details?.details === "string" ? details.details : null,
     providerData: details?.providerData ?? null,
+  };
+}
+
+/**
+ * Selects a window of turns. Without a cursor the newest `limit` turns are
+ * returned; `afterTurnId` pages forward from a turn, `beforeTurnId` backward.
+ */
+export function pageAgentHistory(
+  history: AgentHistory,
+  query: AgentHistoryPageQuery,
+): AgentHistoryPage {
+  const total = history.turns.length;
+  const indexOf = (turnId: string) => {
+    const index = history.turns.findIndex(({ turn }) => turn.id === turnId);
+    if (index < 0)
+      throw new ChatRoomError("NOT_FOUND", "Unknown Agent turn: " + turnId);
+    return index;
+  };
+  const limit = Math.max(1, Math.floor(query.limit));
+  let start: number;
+  let end: number;
+  if (query.afterTurnId !== null) {
+    start = indexOf(query.afterTurnId) + 1;
+    end = Math.min(total, start + limit);
+  } else {
+    end = query.beforeTurnId !== null ? indexOf(query.beforeTurnId) : total;
+    start = Math.max(0, end - limit);
+  }
+  return {
+    session: history.session,
+    turns: history.turns.slice(start, end),
+    totalTurns: total,
+    hasEarlierTurns: start > 0,
+    hasLaterTurns: end < total,
   };
 }

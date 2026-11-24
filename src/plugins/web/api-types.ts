@@ -1,4 +1,7 @@
-import type { Operation as DomainOperation } from "#core/operations/types";
+import type {
+  Operation as DomainOperation,
+  OperationSummary as DomainOperationSummary,
+} from "#core/operations/types";
 import type {
   GitBranch,
   GitChange,
@@ -83,6 +86,7 @@ export interface ComputerPreviewView {
 }
 
 export type Operation = DomainOperation;
+export type OperationSummary = DomainOperationSummary;
 
 export interface AuthStatus {
   authenticated: boolean;

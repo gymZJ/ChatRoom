@@ -1,4 +1,4 @@
-import type { Operation } from "#core/operations/types";
+import type { Operation, OperationSummary } from "#core/operations/types";
 import type {
   OperationQuery,
   OperationRepository as OperationRepositoryPort,
@@ -44,6 +44,44 @@ export class OperationRepository implements OperationRepositoryPort {
   }
 
   list(query: OperationQuery = {}): Operation[] {
+    return (this.select("*", query) as unknown as OperationRow[]).map(fromRow);
+  }
+
+  listSummaries(query: OperationQuery = {}): OperationSummary[] {
+    return (
+      this.select(SUMMARY_COLUMNS, query) as unknown as OperationSummaryRow[]
+    ).map(summaryFromRow);
+  }
+
+  prune({
+    startedBefore,
+    keepLatest,
+  }: {
+    startedBefore: string;
+    keepLatest: number;
+  }): number {
+    return Number(
+      this.database.raw
+        .prepare(
+          `
+          DELETE FROM operations
+          WHERE status != 'running'
+            AND (
+              started_at < ?
+              OR operation_id IN (
+                SELECT operation_id FROM operations
+                WHERE status != 'running'
+                ORDER BY started_at DESC, operation_id DESC
+                LIMIT -1 OFFSET ?
+              )
+            )
+        `,
+        )
+        .run(startedBefore, Math.max(0, Math.floor(keepLatest))).changes,
+    );
+  }
+
+  private select(columns: string, query: OperationQuery) {
     const where: string[] = [];
     const args: string[] = [];
     if (query.pluginId) {
@@ -68,13 +106,11 @@ export class OperationRepository implements OperationRepositoryPort {
         ? 0
         : Math.max(query.offset ?? 0, 0);
     const filter = where.length ? `WHERE ${where.join(" AND ")}` : "";
-    return (
-      this.database.raw
-        .prepare(
-          `SELECT * FROM operations ${filter} ORDER BY started_at DESC, operation_id DESC LIMIT ? OFFSET ?`,
-        )
-        .all(...args, limit, offset) as unknown as OperationRow[]
-    ).map(fromRow);
+    return this.database.raw
+      .prepare(
+        `SELECT ${columns} FROM operations ${filter} ORDER BY started_at DESC, operation_id DESC LIMIT ? OFFSET ?`,
+      )
+      .all(...args, limit, offset);
   }
 
   reconcileRunning(finishedAt: string): number {
@@ -114,6 +150,14 @@ export class OperationRepository implements OperationRepositoryPort {
   }
 }
 
+const SUMMARY_COLUMNS =
+  "operation_id, plugin_id, source, action, status, process_id, input_truncated, output_truncated, started_at, finished_at, duration_ms";
+
+type OperationSummaryRow = Omit<
+  OperationRow,
+  "input_json" | "output_json" | "error_json"
+>;
+
 interface OperationRow {
   operation_id: string;
   plugin_id: string;
@@ -150,7 +194,7 @@ function toRowValues(operation: Operation): Array<string | number | null> {
   ];
 }
 
-function fromRow(row: OperationRow): Operation {
+function summaryFromRow(row: OperationSummaryRow): OperationSummary {
   return {
     operationId: row.operation_id,
     pluginId: row.plugin_id,
@@ -158,14 +202,20 @@ function fromRow(row: OperationRow): Operation {
     action: row.action,
     status: row.status,
     processId: row.process_id,
-    input: parse(row.input_json),
-    output: parse(row.output_json),
-    error: parse(row.error_json),
     inputTruncated: Boolean(row.input_truncated),
     outputTruncated: Boolean(row.output_truncated),
     startedAt: row.started_at,
     finishedAt: row.finished_at,
     durationMs: row.duration_ms,
+  };
+}
+
+function fromRow(row: OperationRow): Operation {
+  return {
+    ...summaryFromRow(row),
+    input: parse(row.input_json),
+    output: parse(row.output_json),
+    error: parse(row.error_json),
   };
 }
 

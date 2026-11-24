@@ -63,14 +63,25 @@ export async function createApplication(
   let agentCustomMcpForCleanup: CustomMcpManager | null = null;
   let customMcpForCleanup: CustomMcpManager | null = null;
   let pluginsForCleanup: PluginManager | null = null;
+  let operationsForCleanup: OperationLog | null = null;
   try {
     const eventBus = new RuntimeEventBus();
     const operations = new OperationLog(
       new OperationRepository(database),
       eventBus,
       config.operations.maxPayloadBytes,
+      {
+        maxAgeDays: config.operations.retentionDays,
+        maxEntries: config.operations.maxEntries,
+      },
     );
+    operationsForCleanup = operations;
     operations.reconcileInterrupted();
+    const pruned = operations.startRetention();
+    if (pruned && database.compactIfSparse())
+      logs.info("operations", "operations.compacted", "Database compacted", {
+        pruned,
+      });
     const mcpTools = new McpToolControl(
       new McpToolSettingsRepository(database),
     );
@@ -182,6 +193,7 @@ export async function createApplication(
       () => gatewayForCleanup?.close(),
       () => agentCustomMcpForCleanup?.close(),
       () => customMcpForCleanup?.close(),
+      () => operationsForCleanup?.stopRetention(),
     ]) {
       try {
         await cleanup();

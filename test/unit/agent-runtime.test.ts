@@ -1291,9 +1291,15 @@ test("Agent MCP schemas and actions retain rich capabilities, settings, turns, a
     };
     await stream.send({ type: "turn.completed", status: "failed", error });
     // Parsing output must retain every rich field, including plan steps and approvals.
+    const fullHistory = fixture.runtime.history(created.id);
     assert.deepEqual(
       await mcp.call("agent_history", { sessionId: created.id }),
-      fixture.runtime.history(created.id),
+      {
+        ...fullHistory,
+        totalTurns: fullHistory.turns.length,
+        hasEarlierTurns: false,
+        hasLaterTurns: false,
+      },
     );
     assert.deepEqual(await mcp.call("agent_sessions", {}), {
       sessions: fixture.runtime.listSessions(),

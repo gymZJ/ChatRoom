@@ -8,6 +8,29 @@ import {
 } from "#mcp/server/tool-support";
 import type { ProcessSupervisor } from "./process-supervisor.js";
 
+const AUDIT_OUTPUT_TAIL_CHARS = 4096;
+
+/**
+ * Polling tools return the same accumulated stdout/stderr over and over. The
+ * process_start operation already records the full run, so these calls keep
+ * only the state and the latest output tail in the operation log.
+ */
+export function auditProcessSnapshot(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const { stdout, stderr, ...snapshot } = value as Record<string, unknown>;
+  const tail = (text: unknown) =>
+    typeof text === "string" && text.length > AUDIT_OUTPUT_TAIL_CHARS
+      ? "…" + text.slice(-AUDIT_OUTPUT_TAIL_CHARS)
+      : text;
+  return {
+    ...snapshot,
+    stdout: tail(stdout),
+    stderr: tail(stderr),
+    stdoutChars: typeof stdout === "string" ? stdout.length : null,
+    stderrChars: typeof stderr === "string" ? stderr.length : null,
+  };
+}
+
 export function registerProcessTools(
   mcp: PluginMcpRegistrar,
   processes: ProcessSupervisor,
@@ -57,6 +80,7 @@ export function registerProcessTools(
       outputSchema: processSnapshotSchema,
       annotations: closedRead,
       action: "read",
+      audit: { output: auditProcessSnapshot },
     },
     (input) => processes.read(input.processId),
   );
@@ -70,6 +94,7 @@ export function registerProcessTools(
       outputSchema: processSnapshotSchema,
       annotations: openWorldMutation,
       action: "write",
+      audit: { output: auditProcessSnapshot },
     },
     (input) => processes.write(input.processId, input.data),
   );
@@ -86,6 +111,7 @@ export function registerProcessTools(
       outputSchema: processSnapshotSchema,
       annotations: destructiveLocalMutation,
       action: (input) => (input.force ? "kill" : "terminate"),
+      audit: { output: auditProcessSnapshot },
     },
     (input) => processes.kill(input.processId, input.force),
   );

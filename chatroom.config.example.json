@@ -14,7 +14,9 @@
     "allowedRedirectHosts": ["chatgpt.com", "localhost", "127.0.0.1"]
   },
   "operations": {
-    "maxPayloadBytes": 524288
+    "maxPayloadBytes": 524288,
+    "retentionDays": 30,
+    "maxEntries": 10000
   },
   "process": {
     "maxOutputBytes": 524288,

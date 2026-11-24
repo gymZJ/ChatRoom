@@ -11,6 +11,8 @@ import type {
 } from "../../src/plugins/web/ui/api.js";
 import { useComputer } from "../../src/plugins/web/ui/composables/useComputer.js";
 import { useOperations } from "../../src/plugins/web/ui/composables/useOperations.js";
+import { useDebouncedValue } from "../../src/plugins/web/ui/composables/useDebouncedValue.js";
+import { useProjectFiles } from "../../src/plugins/web/ui/composables/useProjectFiles.js";
 import { useProcesses } from "../../src/plugins/web/ui/composables/useProcesses.js";
 import { useWorkspaceGit } from "../../src/plugins/web/ui/composables/useWorkspaceGit.js";
 import { useWorkspaceFiles } from "../../src/plugins/web/ui/composables/useWorkspaceFiles.js";
@@ -367,10 +369,16 @@ test("Operation realtime patch keeps server paging offset stable and wins over s
     revision.value += 1;
     await flush();
     const patch = http.requests.at(-1)!;
+    assert.equal(patch.url, "/api/operations/1?view=summary");
     patch.resolve({ ...initial[0]!, status: "success" });
     await flush();
-    assert.equal(state.detail.value?.status, "success");
+    // A patch for the selected entry refreshes its full detail.
     assert.equal(staleDetail.signal?.aborted, true);
+    const refreshedDetail = http.requests.at(-1)!;
+    assert.equal(refreshedDetail.url, "/api/operations/1");
+    refreshedDetail.resolve({ ...initial[0]!, status: "success" });
+    await flush();
+    assert.equal(state.detail.value?.status, "success");
 
     staleDetail.resolve(initial[0]!);
     await flush();
@@ -525,10 +533,10 @@ test("Operation realtime batch commits successes, retries failures, and clear-al
     const batch = http.requests.slice(before);
     assert.equal(batch.length, 2);
     batch
-      .find((request) => request.url.endsWith("/a"))!
+      .find((request) => request.url.endsWith("/a?view=summary"))!
       .resolve({ ...first, status: "success" });
     batch
-      .find((request) => request.url.endsWith("/b"))!
+      .find((request) => request.url.endsWith("/b?view=summary"))!
       .resolve({ code: "INTERNAL", message: "temporary" }, 500);
     await flush();
     await flush();
@@ -538,7 +546,7 @@ test("Operation realtime batch commits successes, retries failures, and clear-al
       "success",
     );
     const retry = http.requests.at(-1)!;
-    assert.equal(retry.url, "/api/operations/b");
+    assert.equal(retry.url, "/api/operations/b?view=summary");
     retry.resolve({ ...second, status: "cancelled" });
     await flush();
 
@@ -588,7 +596,7 @@ test("Operation clear-all aborts an in-flight realtime patch", async () => {
     revision.value += 1;
     await flush();
     const patch = http.requests.at(-1)!;
-    assert.equal(patch.url, "/api/operations/a");
+    assert.equal(patch.url, "/api/operations/a?view=summary");
 
     changes.value = { changes: [], clearAll: true };
     revision.value += 1;
@@ -884,8 +892,8 @@ for (const feature of ["process", "operations", "computer"] as const) {
           clearAll: false,
         }));
         return {
-          listUrl: "/api/operations?limit=50",
-          entityUrl: "/api/operations/a",
+          listUrl: "/api/operations?limit=50&view=summary",
+          entityUrl: "/api/operations/a?view=summary",
           item: operation("a"),
           ids: () => state.events.value.map((item) => item.operationId),
         };
@@ -1031,3 +1039,63 @@ function computerPreview(
     screenshot: { mimeType: "image/png" },
   };
 }
+
+test("debounced values settle after the delay and can be set immediately", async () => {
+  const scope = effectScope();
+  const source = ref("a");
+  const { debounced, set } = scope.run(() => useDebouncedValue(source, 20))!;
+  try {
+    source.value = "ab";
+    await flush();
+    assert.equal(debounced.value, "a");
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    assert.equal(debounced.value, "ab");
+    source.value = "abc";
+    set("");
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    assert.equal(source.value, "");
+    assert.equal(debounced.value, "");
+  } finally {
+    scope.stop();
+  }
+});
+
+test("project files load into a tree, search, and drop loads superseded by a reset", async () => {
+  const http = installHttpHarness();
+  const scope = effectScope();
+  const files = scope.run(() => useProjectFiles())!;
+  try {
+    const loaded = files.load("ws-1", () => true);
+    await flush();
+    const request = http.requests.at(-1)!;
+    assert.equal(request.url, "/api/workspace/project-files?workspaceId=ws-1");
+    request.resolve({
+      paths: ["README.md", "src/app.ts", "src/lib/util.ts"],
+      truncated: false,
+    });
+    await loaded;
+    assert.equal(files.fileSet.value.has("src/app.ts"), true);
+    assert.deepEqual(
+      files.treeRows.value.map((row) => row.path),
+      ["src", "README.md"],
+    );
+    files.toggleDirectory("src");
+    assert.deepEqual(
+      files.treeRows.value.map((row) => row.path),
+      ["src", "src/lib", "src/app.ts", "README.md"],
+    );
+    assert.deepEqual(files.matching("util", 5), ["src/lib/util.ts"]);
+
+    const stale = files.load("ws-2", () => true);
+    await flush();
+    const staleRequest = http.requests.at(-1)!;
+    files.reset();
+    assert.equal(staleRequest.signal?.aborted, true);
+    await stale.catch(() => undefined);
+    assert.equal(files.fileSet.value.size, 0);
+    assert.equal(files.expandedDirectories.value.size, 0);
+  } finally {
+    scope.stop();
+    http.restore();
+  }
+});
