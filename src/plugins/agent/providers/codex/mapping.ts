@@ -335,17 +335,49 @@ export function sessionConfig(context: AgentProviderContext): SessionConfig {
   };
 }
 
-export function standardApprovalChoices(): ApprovalChoice[] {
+/**
+ * Codex session approvals are narrow: for commands the session cache covers
+ * the same command, for file changes the same files. The option ids say so,
+ * so the WebUI can label the scope precisely.
+ */
+export function standardApprovalChoices(
+  scope: "command" | "files",
+  sessionDescription: string | null,
+  extra: ApprovalChoice[] = [],
+): ApprovalChoice[] {
   return [
-    { id: "accept", label: "Allow", description: null },
     {
-      id: "acceptForSession",
-      label: "Allow for this session",
+      id: "accept",
+      label: "Allow once",
       description: null,
+      result: { decision: "accept" },
     },
-    { id: "decline", label: "Deny", description: null },
-    { id: "cancel", label: "Cancel turn", description: null },
-  ].map((choice) => ({ ...choice, result: { decision: choice.id } }));
+    {
+      id:
+        scope === "command"
+          ? "acceptCommandForSession"
+          : "acceptFilesForSession",
+      label:
+        scope === "command"
+          ? "Don't ask again for this command this session"
+          : "Don't ask again for these files this session",
+      description: sessionDescription,
+      result: { decision: "acceptForSession" },
+    },
+    ...extra,
+    {
+      id: "decline",
+      label: "Deny",
+      description: null,
+      result: { decision: "decline" },
+    },
+    {
+      id: "cancel",
+      label: "Cancel turn",
+      description: null,
+      result: { decision: "cancel" },
+    },
+  ];
 }
 
 export function turnError(value: unknown): AgentError | null {

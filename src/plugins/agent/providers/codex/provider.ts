@@ -955,16 +955,16 @@ class CodexSession implements ProviderSession {
     const interactionId = String(request.id);
 
     if (request.method === "item/commandExecution/requestApproval") {
-      const choices = standardApprovalChoices();
+      const extra: ApprovalChoice[] = [];
       const amendment = params.proposedExecpolicyAmendment;
       if (
         Array.isArray(amendment) &&
         amendment.every((part) => typeof part === "string")
       )
-        choices.push({
+        extra.push({
           id: "acceptWithExecpolicyAmendment",
-          label: "Allow similar commands",
-          description: stringifyOptional(amendment),
+          label: "Always allow similar commands",
+          description: amendment.join(" "),
           result: {
             decision: {
               acceptWithExecpolicyAmendment: {
@@ -981,7 +981,7 @@ class CodexSession implements ProviderSession {
           (amendment.action !== "allow" && amendment.action !== "deny")
         )
           return;
-        choices.push({
+        extra.push({
           id: "applyNetworkPolicyAmendment:" + index,
           label:
             (amendment.action === "allow" ? "Allow " : "Deny ") +
@@ -1003,7 +1003,7 @@ class CodexSession implements ProviderSession {
         request,
         "Approve command",
         stringOrNull(params.command) ?? stringOrNull(params.reason),
-        choices,
+        standardApprovalChoices("command", stringOrNull(params.command), extra),
       );
       return;
     }
@@ -1013,7 +1013,7 @@ class CodexSession implements ProviderSession {
         request,
         "Approve file changes",
         stringOrNull(params.reason),
-        standardApprovalChoices(),
+        standardApprovalChoices("files", null),
       );
       return;
     }
@@ -1052,8 +1052,8 @@ class CodexSession implements ProviderSession {
             result: { permissions, scope: "turn" },
           },
           {
-            id: "acceptForSession",
-            label: "Allow for this session",
+            id: "acceptPermissionsForSession",
+            label: "Grant these permissions for this session",
             description: null,
             result: { permissions, scope: "session" },
           },

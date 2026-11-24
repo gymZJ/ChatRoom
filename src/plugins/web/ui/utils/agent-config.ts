@@ -81,12 +81,20 @@ export function permissionModeValue(
   fallback: string | null,
 ): PermissionMode {
   const candidate = value ?? fallback;
-  return candidate === "read-only" ||
-    candidate === "workspace-write" ||
-    candidate === "danger-full-access"
-    ? candidate
-    : null;
+  return PERMISSION_MODES.find((mode) => mode === candidate) ?? null;
 }
+
+const PERMISSION_MODES: readonly NonNullable<PermissionMode>[] = [
+  "read-only",
+  "workspace-write",
+  "danger-full-access",
+  "default",
+  "acceptEdits",
+  "plan",
+  "auto",
+  "dontAsk",
+  "bypassPermissions",
+];
 
 export function nativeConfig(
   providers: readonly AgentProviderStatus[],

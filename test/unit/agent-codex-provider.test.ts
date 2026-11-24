@@ -6,6 +6,7 @@ import type {
   AgentProviderContext,
   ProviderEvent,
 } from "../../src/plugins/agent/provider.js";
+import { standardApprovalChoices } from "../../src/plugins/agent/providers/codex/mapping.js";
 import { CodexProvider } from "../../src/plugins/agent/providers/codex/provider.js";
 import {
   CodexRpcClient,
@@ -539,3 +540,28 @@ test(
     }
   },
 );
+
+test("Codex session approvals name their scope and keep the native decision", () => {
+  const extra = {
+    id: "acceptWithExecpolicyAmendment",
+    label: "Always allow similar commands",
+    description: "npm run",
+    result: { decision: { acceptWithExecpolicyAmendment: {} } },
+  };
+  const command = standardApprovalChoices("command", "npm run build", [extra]);
+  assert.deepEqual(
+    command.map((choice) => [choice.id, choice.result]),
+    [
+      ["accept", { decision: "accept" }],
+      ["acceptCommandForSession", { decision: "acceptForSession" }],
+      ["acceptWithExecpolicyAmendment", extra.result],
+      ["decline", { decision: "decline" }],
+      ["cancel", { decision: "cancel" }],
+    ],
+  );
+  assert.equal(command[1]!.description, "npm run build");
+  assert.equal(
+    standardApprovalChoices("files", null)[1]!.id,
+    "acceptFilesForSession",
+  );
+});

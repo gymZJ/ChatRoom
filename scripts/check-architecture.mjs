@@ -14,6 +14,7 @@ const childProcessAllowed = new Set([
 const platformBranchAllowed = [
   "src/config/platform-paths.ts",
   "src/plugins/agent/providers/codex/launch.ts",
+  "src/plugins/agent/providers/claude/launch.ts",
   "src/plugins/process/infrastructure/",
   "src/plugins/computer/computer-native-host.ts",
 ];

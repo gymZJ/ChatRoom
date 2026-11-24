@@ -218,10 +218,15 @@ export const zhChatRoom: typeof enChatRoom = {
     permissionMode: "权限模式",
     approvalChoices: {
       accept: "批准一次",
-      session: "本会话批准",
+      session: "按建议规则在本会话批准",
+      commandSession: "本会话不再询问此命令",
+      filesSession: "本会话不再询问这些文件",
+      editsSession: "本会话自动接受文件编辑",
+      toolSession: "本会话允许此工具的所有调用",
+      permissionsSession: "本会话授予这些权限",
       deny: "拒绝",
       cancel: "取消轮次",
-      similar: "批准类似命令",
+      similar: "始终批准类似命令",
     },
     moreApprovalOptions: "更多审批选项",
     interactionResolved: "已处理",
@@ -267,6 +272,32 @@ export const zhChatRoom: typeof enChatRoom = {
       fullAccessCodex: {
         title: "完全权限 / Full Access",
         description: "关闭沙箱。选择此项同时关闭常规逐项审批。",
+      },
+      fullAccessClaude: {
+        title: "跳过权限检查 / Bypass",
+        description:
+          "跳过 Claude Code 的全部权限检查，工具可修改你账户能访问的任何内容。",
+      },
+      claudeDefault: {
+        title: "询问权限",
+        description:
+          "编辑文件、执行命令和使用其他敏感工具前由 Claude Code 询问。",
+      },
+      acceptEdits: {
+        title: "自动接受编辑",
+        description: "自动应用文件编辑；命令和其他敏感工具仍会询问。",
+      },
+      planMode: {
+        title: "计划模式",
+        description: "只探索并提出计划，不修改文件；批准计划后再开始执行。",
+      },
+      autoMode: {
+        title: "自动模式",
+        description: "由 Claude Code 安全分类器批准或拒绝权限请求。",
+      },
+      dontAsk: {
+        title: "不询问",
+        description: "从不弹出询问；权限规则未允许的操作一律拒绝。",
       },
     },
     granularApprovals: "Granular 审批项",

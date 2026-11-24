@@ -48,7 +48,7 @@ const permissionMode = z
   .enum(AGENT_PERMISSION_MODES)
   .nullable()
   .describe(
-    "Provider-native permissions. Codex supports read-only, workspace-write, and danger-full-access. Null uses the provider default. Read agent_providers for supported options.",
+    "Provider-native permissions. Codex supports read-only, workspace-write, and danger-full-access (sandbox). Claude Code supports default, acceptEdits, plan, auto, dontAsk, and bypassPermissions. Null uses the provider default. Read agent_providers for supported options.",
   );
 
 const settings = {
@@ -579,7 +579,7 @@ export function registerAgentTools(
     {
       title: "Configure Agent session",
       description:
-        "Atomically update model settings and provider-native permission settings for subsequent turns. Codex uses approvalPolicy, approvalsReviewer and permissionMode (sandbox). Omitted fields retain current values; null resets a field to its provider default. Read agent_providers for the exact native options.",
+        "Atomically update model settings and provider-native permission settings for subsequent turns. Codex uses approvalPolicy, approvalsReviewer and permissionMode (sandbox); Claude Code uses permissionMode only. Omitted fields retain current values; null resets a field to its provider default. Read agent_providers for the exact native options.",
       inputSchema: z.object({
         sessionId: z.string().min(1),
         model: settings.model.optional(),

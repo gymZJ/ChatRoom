@@ -230,10 +230,15 @@ export const enChatRoom = {
     permissionMode: "Permission mode",
     approvalChoices: {
       accept: "Allow once",
-      session: "Allow for session",
+      session: "Allow as suggested for this session",
+      commandSession: "Don't ask again for this command this session",
+      filesSession: "Don't ask again for these files this session",
+      editsSession: "Auto-accept file edits this session",
+      toolSession: "Allow this tool for the rest of the session",
+      permissionsSession: "Grant these permissions for this session",
       deny: "Deny",
       cancel: "Cancel turn",
-      similar: "Allow similar commands",
+      similar: "Always allow similar commands",
     },
     moreApprovalOptions: "More approval options",
     interactionResolved: "Resolved",
@@ -288,6 +293,36 @@ export const enChatRoom = {
         title: "Full Access",
         description:
           "Disable the sandbox. Selecting this also disables routine approval prompts.",
+      },
+      fullAccessClaude: {
+        title: "Bypass permissions",
+        description:
+          "Skip every Claude Code permission check; tools can change anything your account can.",
+      },
+      claudeDefault: {
+        title: "Ask for permission",
+        description:
+          "Claude Code asks before file edits, commands and other sensitive tools.",
+      },
+      acceptEdits: {
+        title: "Auto-accept edits",
+        description:
+          "Apply file edits automatically; commands and other sensitive tools still ask.",
+      },
+      planMode: {
+        title: "Plan mode",
+        description:
+          "Explore and propose a plan without changing files; you approve the plan before work starts.",
+      },
+      autoMode: {
+        title: "Auto mode",
+        description:
+          "A Claude Code safety classifier approves or denies permission prompts.",
+      },
+      dontAsk: {
+        title: "Don't ask",
+        description:
+          "Never prompt; anything not allowed by permission rules is denied.",
       },
     },
     granularApprovals: "Granular approvals",

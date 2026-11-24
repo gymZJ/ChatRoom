@@ -110,7 +110,18 @@ const nativeOptionKeys: Record<string, string> = {
   "read-only": "readOnly",
   "workspace-write": "workspaceWrite",
   "danger-full-access": "fullAccessCodex",
+  default: "claudeDefault",
+  acceptEdits: "acceptEdits",
+  plan: "planMode",
+  auto: "autoMode",
+  dontAsk: "dontAsk",
+  bypassPermissions: "fullAccessClaude",
 };
+
+const fullAccessModes = new Set<PermissionMode>([
+  "danger-full-access",
+  "bypassPermissions",
+]);
 
 function nativeOptionLabel(
   id: string,
@@ -125,7 +136,7 @@ function nativeOptionLabel(
 
 function setPermissionMode(value: PermissionMode) {
   if (value === permissionMode.value) return;
-  if (value === "danger-full-access") {
+  if (fullAccessModes.has(value)) {
     pendingPermissionMode.value = value;
     return;
   }

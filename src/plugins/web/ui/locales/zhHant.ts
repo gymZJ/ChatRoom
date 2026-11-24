@@ -218,10 +218,15 @@ export const zhHantChatRoom: typeof enChatRoom = {
     permissionMode: "權限模式",
     approvalChoices: {
       accept: "批准一次",
-      session: "本對話批准",
+      session: "依建議規則在本對話批准",
+      commandSession: "本對話不再詢問此命令",
+      filesSession: "本對話不再詢問這些檔案",
+      editsSession: "本對話自動接受檔案編輯",
+      toolSession: "本對話允許此工具的所有呼叫",
+      permissionsSession: "本對話授予這些權限",
       deny: "拒絕",
       cancel: "取消輪次",
-      similar: "批准類似命令",
+      similar: "始終批准類似命令",
     },
     moreApprovalOptions: "更多審批選項",
     interactionResolved: "已處理",
@@ -267,6 +272,32 @@ export const zhHantChatRoom: typeof enChatRoom = {
       fullAccessCodex: {
         title: "完全權限 / Full Access",
         description: "關閉沙箱。選擇此項同時關閉一般逐項審批。",
+      },
+      fullAccessClaude: {
+        title: "略過權限檢查 / Bypass",
+        description:
+          "略過 Claude Code 的全部權限檢查，工具可修改你帳戶能存取的任何內容。",
+      },
+      claudeDefault: {
+        title: "詢問權限",
+        description:
+          "編輯檔案、執行命令和使用其他敏感工具前由 Claude Code 詢問。",
+      },
+      acceptEdits: {
+        title: "自動接受編輯",
+        description: "自動套用檔案編輯；命令和其他敏感工具仍會詢問。",
+      },
+      planMode: {
+        title: "計畫模式",
+        description: "只探索並提出計畫，不修改檔案；批准計畫後再開始執行。",
+      },
+      autoMode: {
+        title: "自動模式",
+        description: "由 Claude Code 安全分類器批准或拒絕權限請求。",
+      },
+      dontAsk: {
+        title: "不詢問",
+        description: "從不彈出詢問；權限規則未允許的操作一律拒絕。",
       },
     },
     granularApprovals: "Granular 審批項",

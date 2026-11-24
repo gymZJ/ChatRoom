@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { siOpenai } from "simple-icons";
+import { siClaude, siOpenai } from "simple-icons";
 
 const props = withDefaults(
   defineProps<{
@@ -12,6 +12,7 @@ const props = withDefaults(
 
 const iconPaths: Record<string, string> = {
   openai: siOpenai.path,
+  claude: siClaude.path,
 };
 
 const path = computed(() =>

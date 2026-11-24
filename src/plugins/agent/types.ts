@@ -35,15 +35,26 @@ export type CodexApprovalsReviewer =
 export type CodexSandboxMode =
   "read-only" | "workspace-write" | "danger-full-access";
 
+export type ClaudePermissionMode =
+  "default" | "acceptEdits" | "plan" | "auto" | "dontAsk" | "bypassPermissions";
+
+export type AgentPermissionMode = CodexSandboxMode | ClaudePermissionMode;
+
 export const AGENT_PERMISSION_MODES = [
   "read-only",
   "workspace-write",
   "danger-full-access",
-] as const;
+  "default",
+  "acceptEdits",
+  "plan",
+  "auto",
+  "dontAsk",
+  "bypassPermissions",
+] as const satisfies readonly AgentPermissionMode[];
 
 export function isAgentPermissionMode(
   value: unknown,
-): value is CodexSandboxMode {
+): value is AgentPermissionMode {
   return (
     typeof value === "string" &&
     AGENT_PERMISSION_MODES.some((mode) => mode === value)
@@ -64,7 +75,7 @@ export interface AgentSessionConfig {
   serviceTier: string | null;
   approvalPolicy: CodexApprovalPolicy | null;
   approvalsReviewer: CodexApprovalsReviewer | null;
-  permissionMode: CodexSandboxMode | null;
+  permissionMode: AgentPermissionMode | null;
 }
 
 export interface TokenUsageBreakdown {

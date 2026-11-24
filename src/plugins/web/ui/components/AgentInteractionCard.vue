@@ -57,6 +57,11 @@ const approvalKeys: Record<string, string> = {
   accept: "accept",
   allow: "accept",
   acceptForSession: "session",
+  acceptCommandForSession: "commandSession",
+  acceptFilesForSession: "filesSession",
+  acceptEditsForSession: "editsSession",
+  acceptToolForSession: "toolSession",
+  acceptPermissionsForSession: "permissionsSession",
   decline: "deny",
   deny: "deny",
   cancel: "cancel",
@@ -371,11 +376,18 @@ function setAnswer(questionId: string, value: unknown) {
 .agent-interaction-actions > :deep(.v-btn:not(.v-btn--icon)) {
   flex: 1 1 auto;
 }
+/* Option descriptions can carry whole commands; a one-line ellipsis would
+   size the menu to the full command, so cap the width and wrap instead. */
 .agent-approval-more-menu {
-  max-inline-size: 90vw;
+  inline-size: max-content;
+  max-inline-size: min(28rem, calc(100vw - 24px));
 }
 .agent-approval-more-menu :deep(.v-list-item-subtitle) {
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
   overflow-wrap: anywhere;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.75rem;
 }
 .agent-interaction-actions :deep(.v-btn__content) {
   min-inline-size: 0;
