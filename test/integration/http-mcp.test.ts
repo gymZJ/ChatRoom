@@ -34,6 +34,24 @@ test("MCP accepts 2025-era initialization in stateless mode", async () => {
       assert.equal(response.status, 200, protocolVersion);
       assert.match(await response.text(), new RegExp(protocolVersion));
     }
+    const listed = await fetch(`http://127.0.0.1:${address.port}/mcp`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+        "mcp-protocol-version": "2025-11-25",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/list",
+        params: {},
+      }),
+    });
+    assert.equal(listed.status, 200);
+    const tools = await listed.text();
+    assert.match(tools, /"workspace_list"/);
+    assert.doesNotMatch(tools, /"computer_(snapshot|action)"/);
   } finally {
     await runtime.cleanup();
   }
@@ -132,37 +150,12 @@ test("remote WebUI mutations require same-origin while loopback WebUI stays loca
     assert.ok(cookie);
     assert.match(cookie, /Secure/);
 
-    runtime.components.computer.setSettings({
-      enabled: true,
-      remoteAccess: false,
-    });
-    const blockedComputerPreview = await requestWithHost(
+    const removedPreview = await requestWithHost(
       address.port,
       "/api/computer/preview",
-      {
-        method: "GET",
-        host: "chatroom.example.com",
-        headers: { cookie },
-      },
+      { method: "GET", host: "chatroom.example.com", headers: { cookie } },
     );
-    assert.equal(
-      blockedComputerPreview.status,
-      403,
-      "remote WebUI must not read Computer screenshots while remote access is disabled",
-    );
-
-    runtime.components.computer.setSettings({ remoteAccess: true });
-    const allowedComputerPreview = await requestWithHost(
-      address.port,
-      "/api/computer/preview",
-      {
-        method: "GET",
-        host: "chatroom.example.com",
-        headers: { cookie },
-      },
-    );
-    assert.equal(allowedComputerPreview.status, 200);
-    assert.equal(allowedComputerPreview.body, "null");
+    assert.equal(removedPreview.status, 404);
 
     const wrongOrigin = await requestWithHost(address.port, "/api/operations", {
       method: "DELETE",

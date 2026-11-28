@@ -30,28 +30,11 @@ export class IngressPolicy {
   }
 
   requiresWebAuth(req: Request): boolean {
-    if (this.isRemoteWeb(req)) return true;
-    return this.config.auth.localWebAuth;
-  }
-
-  isExternalWeb(req: Request): boolean {
-    return this.externalAccess.matches("web", req.hostname);
-  }
-
-  isRemoteWeb(req: Request): boolean {
-    return this.externalAccess.hasHost(req.hostname) || !isLoopbackPeer(req);
+    return this.isRemote(req) || this.config.auth.localWebAuth;
   }
 
   requiresMcpAuth(req: Request): boolean {
-    return this.isRemoteMcp(req);
-  }
-
-  isExternalMcp(req: Request): boolean {
-    return this.externalAccess.matches("mcp", req.hostname);
-  }
-
-  isRemoteMcp(req: Request): boolean {
-    return this.externalAccess.hasHost(req.hostname) || !isLoopbackPeer(req);
+    return this.isRemote(req);
   }
 
   secureWebCookie(req: Request): boolean {
@@ -84,6 +67,11 @@ export class IngressPolicy {
       /\/$/,
       "",
     );
+  }
+
+  /** Requests routed through an external host or from a non-loopback peer. */
+  private isRemote(req: Request): boolean {
+    return this.externalAccess.hasHost(req.hostname) || !isLoopbackPeer(req);
   }
 
   private externalBaseUrl(

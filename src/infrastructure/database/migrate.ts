@@ -6,7 +6,7 @@ import {
   WORKSPACES_SCHEMA,
 } from "./schema.js";
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 3;
 const LEGACY_SESSION_COLUMNS = [
   "id",
   "workspace_root",
@@ -35,7 +35,10 @@ export function initializeDatabase(database: DatabaseSync): void {
   // Older installations can have user_version=2 while still retaining the
   // original 1.2.0 agent_sessions layout. Accept that specific layout only;
   // never downgrade an unknown newer database.
-  if (version > SCHEMA_VERSION && !(version === 2 && recognizedLegacySessions))
+  if (
+    (version === 2 || version > SCHEMA_VERSION) &&
+    !(version === 2 && recognizedLegacySessions)
+  )
     throw new Error(`Unsupported newer ChatRoom database schema: ${version}`);
   if (legacySessions && !recognizedLegacySessions)
     throw new Error("Unrecognized ChatRoom agent_sessions schema");
@@ -55,6 +58,7 @@ export function initializeDatabase(database: DatabaseSync): void {
     try {
       if (legacySessions) migrateLegacySessions(database);
       database.exec(DATABASE_SCHEMA);
+      if (version < SCHEMA_VERSION) retireComputerUse(database);
       if (legacySessions) {
         const invalidReferences = database
           .prepare("PRAGMA foreign_key_check")
@@ -71,6 +75,15 @@ export function initializeDatabase(database: DatabaseSync): void {
   } finally {
     database.exec("PRAGMA foreign_keys = ON;");
   }
+}
+
+function retireComputerUse(database: DatabaseSync): void {
+  database.exec(`
+    DELETE FROM mcp_tool_settings WHERE tool_name IN ('computer_action', 'computer_snapshot');
+    DELETE FROM agent_mcp_tool_settings WHERE tool_name IN ('computer_action', 'computer_snapshot');
+    DROP TABLE IF EXISTS computer_policy;
+    DROP TABLE IF EXISTS computer_settings;
+  `);
 }
 
 function migrateLegacySessions(database: DatabaseSync): void {

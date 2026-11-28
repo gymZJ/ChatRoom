@@ -72,8 +72,6 @@ const localizedTools = new Set([
   "process_read",
   "process_write",
   "process_kill",
-  "computer_snapshot",
-  "computer_action",
   "agent_providers",
   "agent_provider_details",
   "agent_models",
@@ -143,7 +141,7 @@ async function setGroupEnabled(
 }
 
 function pluginLabel(pluginId: string): string {
-  const known = ["workspace", "process", "computer", "agent"];
+  const known = ["workspace", "process", "agent"];
   return known.includes(pluginId)
     ? locale.t("$vuetify.chatroom.mcpTools.plugins." + pluginId)
     : pluginId;

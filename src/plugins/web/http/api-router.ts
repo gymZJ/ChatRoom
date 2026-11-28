@@ -15,7 +15,6 @@ import { createGitApiRouter } from "./git-api-router.js";
 import type { IngressPolicy } from "#auth/ingress-policy";
 import type { CloudController } from "#plugins/cloud/controller";
 import { createCloudApiRouter } from "./cloud-api-router.js";
-import { createComputerApiRouter } from "./computer-api-router.js";
 import {
   apiAuthentication,
   createPrivateAuthApiRouter,
@@ -107,13 +106,6 @@ export function createApiRouter(
   router.use(createProcessApiRouter(application));
   router.use(createTerminalApiRouter(application));
   router.use(createAgentApiRouter(application.agents));
-  router.use(
-    createComputerApiRouter(
-      application.computer,
-      application.operations,
-      ingress,
-    ),
-  );
   router.use(createCloudApiRouter(cloud, application.operations));
   return router;
 }

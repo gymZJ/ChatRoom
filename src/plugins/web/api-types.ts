@@ -32,11 +32,6 @@ import type {
   CloudStatus as DomainCloudStatus,
 } from "#plugins/cloud/types";
 import type {
-  ComputerDisplay,
-  ComputerPermission,
-  ComputerStatus,
-} from "#plugins/computer/types";
-import type {
   WorkspaceEntry,
   WorkspaceInfo,
   WorkspaceSkill,
@@ -57,9 +52,6 @@ export type {
   AgentSession,
   AgentTurn,
   AgentTurnSource,
-  ComputerDisplay,
-  ComputerPermission,
-  ComputerStatus,
   GitBranch,
   GitChange,
   GitCommit,
@@ -72,18 +64,6 @@ export type {
   WorkspaceInfo,
   WorkspaceSkill,
 };
-
-export interface ComputerPreviewView {
-  snapshotId: string;
-  revision: number;
-  capturedAt: string | null;
-  display: ComputerDisplay | null;
-  activeApp: string | null;
-  activeWindow: string | null;
-  cursor: { x: number; y: number } | null;
-  elementCount: number;
-  screenshot: { mimeType: "image/jpeg" | "image/png" } | null;
-}
 
 export type Operation = DomainOperation;
 export type OperationSummary = DomainOperationSummary;

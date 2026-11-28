@@ -13,7 +13,6 @@ export type View =
   | "workspaces"
   | "agents"
   | "processes"
-  | "computer"
   | "tools"
   | "cloud"
   | "operations"
@@ -78,13 +77,6 @@ const definitions: readonly ViewDefinition[] = [
     titleKey: "nav.processes",
     icon: "$mdiConsoleLine",
     load: () => import("../components/ProcessesView.vue"),
-  }),
-  viewDefinition({
-    id: "computer",
-    path: "/computer",
-    titleKey: "nav.computer",
-    icon: "$mdiMonitor",
-    load: () => import("../components/ComputerView.vue"),
   }),
   viewDefinition({
     id: "tools",

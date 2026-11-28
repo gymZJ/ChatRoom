@@ -4,7 +4,7 @@ import { api, type RuntimeStatus, type UpdateStatus } from "../api.js";
 import { createRequestGate } from "../utils/requests.js";
 
 type ConnectionState = "connecting" | "connected" | "reconnecting" | "offline";
-type RefreshScope = "processes" | "operations" | "computer" | "agents";
+type RefreshScope = "processes" | "operations" | "agents";
 
 export interface ProcessRefreshHint {
   processId: string;
@@ -21,14 +21,6 @@ export interface OperationRefreshHint {
 export interface OperationRefreshBatch {
   changes: OperationRefreshHint[];
   clearAll: boolean;
-}
-
-export interface ComputerRefreshHint {
-  status: boolean;
-  preview: boolean;
-  previewSnapshotId: string | null;
-  operationsReset: boolean;
-  operationIds: string[];
 }
 
 export interface AgentRefreshHint {
@@ -53,9 +45,7 @@ type RuntimeEvent =
       processId: string;
       output?: boolean;
       deleted?: boolean;
-    }
-  | { type: "computer-settings" }
-  | { type: "computer-snapshot"; snapshotId: string };
+    };
 
 const EVENT_COALESCE_MS = 100;
 const RUNTIME_POLL_MS = 15_000;
@@ -66,19 +56,11 @@ export function useRuntimeEvents() {
   const updateStatus = shallowRef<UpdateStatus | null>(null);
   const processRevision = shallowRef(0);
   const operationRevision = shallowRef(0);
-  const computerRevision = shallowRef(0);
   const agentRevision = shallowRef(0);
   const processChanges = shallowRef<ProcessRefreshHint[] | null>([]);
   const operationChanges = shallowRef<OperationRefreshBatch | null>({
     changes: [],
     clearAll: false,
-  });
-  const computerChanges = shallowRef<ComputerRefreshHint | null>({
-    status: false,
-    preview: false,
-    previewSnapshotId: null,
-    operationsReset: false,
-    operationIds: [],
   });
   const agentChanges = shallowRef<AgentRefreshHint[] | null>([]);
   const connectionState = shallowRef<ConnectionState>("connecting");
@@ -96,20 +78,14 @@ export function useRuntimeEvents() {
     { output: boolean; summary: boolean; deleted: boolean }
   >();
   const pendingOperationChanges = new Map<string, string>();
-  const pendingComputerOperationIds = new Set<string>();
   const pendingAgentChanges = new Map<
     string,
     { turnIds: Set<string>; itemIds: Set<string>; deleted: boolean }
   >();
 
-  let pendingComputerStatus = false;
-  let pendingComputerPreview = false;
-  let pendingComputerPreviewSnapshotId: string | null = null;
-  let pendingComputerOperationsReset = false;
   let pendingGlobalProcessEvent = false;
   let pendingGlobalOperationEvent = false;
   let pendingOperationClear = false;
-  let pendingGlobalComputerEvent = false;
   let pendingGlobalAgentEvent = false;
 
   const runtimeRequests = createRequestGate();
@@ -191,27 +167,11 @@ export function useRuntimeEvents() {
         case "operation":
           pendingOperationChanges.set(event.operationId, event.pluginId);
           scheduleRefresh("operations");
-          if (event.pluginId === "computer") {
-            pendingComputerOperationIds.add(event.operationId);
-            scheduleRefresh("computer");
-          }
           break;
         case "operations-cleared":
           pendingOperationClear = true;
           pendingOperationChanges.clear();
-          pendingComputerOperationsReset = true;
           scheduleRefresh("operations");
-          scheduleRefresh("computer");
-          break;
-        case "computer-settings":
-          pendingComputerStatus = true;
-          pendingComputerPreview = true;
-          scheduleRefresh("computer");
-          break;
-        case "computer-snapshot":
-          pendingComputerPreview = true;
-          pendingComputerPreviewSnapshotId = event.snapshotId;
-          scheduleRefresh("computer");
           break;
       }
     });
@@ -220,11 +180,9 @@ export function useRuntimeEvents() {
   function scheduleGlobalRefresh() {
     pendingGlobalProcessEvent = true;
     pendingGlobalOperationEvent = true;
-    pendingGlobalComputerEvent = true;
     pendingGlobalAgentEvent = true;
     scheduleRefresh("processes");
     scheduleRefresh("operations");
-    scheduleRefresh("computer");
     scheduleRefresh("agents");
   }
 
@@ -296,25 +254,6 @@ export function useRuntimeEvents() {
       operationRevision.value += 1;
     }
 
-    if (pendingScopes.delete("computer")) {
-      computerChanges.value = pendingGlobalComputerEvent
-        ? null
-        : {
-            status: pendingComputerStatus,
-            preview: pendingComputerPreview,
-            previewSnapshotId: pendingComputerPreviewSnapshotId,
-            operationsReset: pendingComputerOperationsReset,
-            operationIds: [...pendingComputerOperationIds],
-          };
-      pendingComputerStatus = false;
-      pendingComputerPreview = false;
-      pendingComputerPreviewSnapshotId = null;
-      pendingComputerOperationsReset = false;
-      pendingComputerOperationIds.clear();
-      pendingGlobalComputerEvent = false;
-      computerRevision.value += 1;
-    }
-
     if (pendingScopes.has("agents")) flushAgents();
   }
 
@@ -337,16 +276,10 @@ export function useRuntimeEvents() {
     pendingScopes.clear();
     pendingProcessChanges.clear();
     pendingOperationChanges.clear();
-    pendingComputerOperationIds.clear();
     pendingAgentChanges.clear();
-    pendingComputerStatus = false;
-    pendingComputerPreview = false;
-    pendingComputerPreviewSnapshotId = null;
-    pendingComputerOperationsReset = false;
     pendingGlobalProcessEvent = false;
     pendingGlobalOperationEvent = false;
     pendingOperationClear = false;
-    pendingGlobalComputerEvent = false;
     pendingGlobalAgentEvent = false;
   }
 
@@ -421,8 +354,6 @@ export function useRuntimeEvents() {
     processChanges,
     operationRevision,
     operationChanges,
-    computerRevision,
-    computerChanges,
     agentRevision,
     agentChanges,
     connectionState,

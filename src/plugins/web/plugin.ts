@@ -1,6 +1,5 @@
 import type { InternalPlugin } from "#plugins/types";
 import { createServiceToken } from "#app/service-registry";
-import { ComputerServiceToken } from "#plugins/computer/plugin";
 import { GitAccessToken } from "#app/git-access";
 import { ProcessServiceToken } from "#plugins/process/plugin";
 import { WorkspaceServiceToken } from "#plugins/workspace/plugin";
@@ -22,7 +21,6 @@ export function createWebPlugin(): InternalPlugin {
           context.services.require(GitAccessToken),
           context.operations,
           context.services.require(ProcessServiceToken),
-          context.services.require(ComputerServiceToken),
           context.services.require(AgentServiceToken),
           context.mcpTools,
           context.customMcp,

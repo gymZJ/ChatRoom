@@ -19,7 +19,6 @@ import { createOAuthRouter } from "#presentation/http/oauth-router";
 import { errorMiddleware } from "#presentation/http/http-utils";
 import { IngressPolicy } from "#auth/ingress-policy";
 import { CHATROOM_VERSION } from "#core/runtime/identity";
-import { runWithMcpAccessScope } from "#mcp/server/request-context";
 import type { LogService } from "#core/logging/types";
 import {
   hostValidation,
@@ -96,10 +95,7 @@ export class HttpServer {
       },
       mcpAuthentication(this.auth, this.ingress),
       (req, res) => {
-        const scope = this.ingress.isRemoteMcp(req) ? "remote" : "local";
-        runWithMcpAccessScope(scope, () => {
-          void nodeMcp(req, res, req.body);
-        });
+        void nodeMcp(req, res, req.body);
       },
     );
 

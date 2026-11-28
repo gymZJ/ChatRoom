@@ -20,10 +20,6 @@ import {
   ProcessServiceToken,
 } from "#plugins/process/plugin";
 import { createCloudPlugin, CloudServiceToken } from "#plugins/cloud/plugin";
-import {
-  createComputerPlugin,
-  ComputerServiceToken,
-} from "#plugins/computer/plugin";
 import { createAgentPlugin } from "#plugins/agent/plugin";
 import { createWebPlugin, WebServiceToken } from "#plugins/web/plugin";
 import { createChatRoomMcpHandler } from "#mcp/server/create-mcp-server";
@@ -49,7 +45,6 @@ export interface ApplicationComponents {
   agentMcpTools: McpToolControl;
   processes: import("#plugins/process/process-supervisor").ProcessSupervisor;
   cloud: import("#plugins/cloud/controller").CloudController;
-  computer: import("#plugins/computer/computer-service").ComputerService;
   http: HttpServer;
   logs: LogService;
 }
@@ -142,7 +137,6 @@ export async function createApplication(
         createGitPlugin(),
         createWorkspacePlugin(),
         createProcessPlugin(),
-        createComputerPlugin(),
         createCloudPlugin(),
         createAgentPlugin(),
         createWebPlugin(),
@@ -157,7 +151,6 @@ export async function createApplication(
     const web = services.require(WebServiceToken);
     const processes = services.require(ProcessServiceToken);
     const cloud = services.require(CloudServiceToken);
-    const computer = services.require(ComputerServiceToken);
     const mcp = createChatRoomMcpHandler(activePlugins, customMcp);
     const http = new HttpServer(
       config,
@@ -181,7 +174,6 @@ export async function createApplication(
       agentMcpTools,
       processes,
       cloud,
-      computer,
       http,
       logs,
     };

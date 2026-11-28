@@ -36,12 +36,11 @@ export class ExternalAccessRegistry {
     return null;
   }
 
-  matches(kind: ExternalAccessKind, hostname: string): boolean {
-    return this.baseUrlForHost(kind, hostname) !== null;
-  }
-
   hasHost(hostname: string): boolean {
-    return this.matches("mcp", hostname) || this.matches("web", hostname);
+    return (
+      this.baseUrlForHost("mcp", hostname) !== null ||
+      this.baseUrlForHost("web", hostname) !== null
+    );
   }
 
   private urls(kind: ExternalAccessKind): string[] {

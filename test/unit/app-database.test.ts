@@ -137,7 +137,7 @@ test("AppDatabase upgrades 1.2.0 sessions without losing related data", async ()
         );
         assert.equal(
           database.raw.prepare("PRAGMA user_version").get()?.user_version,
-          1,
+          3,
         );
         assert.equal(
           database.raw
@@ -218,7 +218,7 @@ test("AppDatabase migrates a real-world 1.2 layout with user_version=2 and extra
       try {
         assert.equal(
           upgraded.raw.prepare("PRAGMA user_version").get()?.user_version,
-          1,
+          3,
         );
         assert.equal(
           upgraded.raw
@@ -264,7 +264,7 @@ test("AppDatabase rejects unknown schema versions and unrecognized session layou
   const root = await mkdtemp(path.join(os.tmpdir(), "chatroom-migration-"));
   try {
     for (const [version, extra] of [
-      [3, ""],
+      [4, ""],
       [2, "ALTER TABLE agent_sessions ADD COLUMN unexpected TEXT;"],
     ] as const) {
       const filename = path.join(
@@ -400,6 +400,56 @@ test("AppDatabase rolls back a migration that violates existing references", asy
       );
     } finally {
       original.close();
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("AppDatabase removes retired Computer Use configuration on upgrade", async () => {
+  const root = await mkdtemp(
+    path.join(os.tmpdir(), "chatroom-computer-cleanup-"),
+  );
+  const filename = path.join(root, "app.sqlite");
+  try {
+    const previous = new AppDatabase(filename);
+    try {
+      previous.raw.exec(`
+        CREATE TABLE computer_settings (id INTEGER PRIMARY KEY, enabled INTEGER);
+        CREATE TABLE computer_policy (id INTEGER PRIMARY KEY, blocked_apps_json TEXT);
+        INSERT INTO computer_settings VALUES (1, 1);
+        INSERT INTO mcp_tool_settings(tool_name, enabled, updated_at)
+          VALUES ('computer_action', 1, 'old'), ('computer_snapshot', 1, 'old'), ('process_read', 1, 'old');
+        INSERT INTO agent_mcp_tool_settings(tool_name, enabled, updated_at)
+          VALUES ('computer_snapshot', 1, 'old');
+        PRAGMA user_version = 1;
+      `);
+    } finally {
+      previous.close();
+    }
+    const next = new AppDatabase(filename);
+    try {
+      assert.equal(
+        next.raw
+          .prepare(
+            "SELECT name FROM sqlite_schema WHERE name IN ('computer_settings', 'computer_policy')",
+          )
+          .get(),
+        undefined,
+      );
+      assert.deepEqual(
+        next.raw
+          .prepare("SELECT tool_name FROM mcp_tool_settings")
+          .all()
+          .map((row) => row.tool_name),
+        ["process_read"],
+      );
+      assert.deepEqual(
+        next.raw.prepare("SELECT tool_name FROM agent_mcp_tool_settings").all(),
+        [],
+      );
+    } finally {
+      next.close();
     }
   } finally {
     await rm(root, { recursive: true, force: true });

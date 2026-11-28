@@ -9,14 +9,12 @@ const childProcessAllowed = new Set([
   "src/core/runtime/command-runner.ts",
   "src/core/runtime/line-process.ts",
   "src/plugins/process/infrastructure/pipe-process-backend.ts",
-  "src/plugins/computer/computer-native-host.ts",
 ]);
 const platformBranchAllowed = [
   "src/config/platform-paths.ts",
   "src/plugins/agent/providers/codex/launch.ts",
   "src/plugins/agent/providers/claude/launch.ts",
   "src/plugins/process/infrastructure/",
-  "src/plugins/computer/computer-native-host.ts",
 ];
 
 for (const file of files.filter((entry) => /\.(?:ts|tsx|vue)$/.test(entry))) {

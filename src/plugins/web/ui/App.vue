@@ -108,8 +108,6 @@ const {
   processChanges,
   operationRevision,
   operationChanges,
-  computerRevision,
-  computerChanges,
   agentRevision,
   agentChanges,
   connectionState,
@@ -153,11 +151,6 @@ const currentProps = computed<Record<string, unknown>>(() => {
       return {
         revision: operationRevision.value,
         changes: operationChanges.value,
-      };
-    case "computer":
-      return {
-        revision: computerRevision.value,
-        changes: computerChanges.value,
       };
     case "agents":
       return {

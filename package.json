@@ -23,9 +23,6 @@
     "start": "node dist/cli/index.js serve",
     "release": "npm publish --tag latest --access public",
     "prepack": "npm run check",
-    "build:native:macos": "node scripts/build-native-macos.mjs",
-    "build:native:windows": "node scripts/build-native-windows.mjs",
-    "build:native:linux": "node scripts/build-native-linux.mjs",
     "clean:all": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "postinstall": "node scripts/ensure-pty-helper.mjs"
   },

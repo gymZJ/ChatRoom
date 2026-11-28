@@ -2,14 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { effectScope, nextTick, ref } from "vue";
 import type {
-  ComputerPreviewView,
-  ComputerStatus,
   GitStatus,
   Operation,
   ProcessSnapshot,
   ProcessSummary,
 } from "../../src/plugins/web/ui/api.js";
-import { useComputer } from "../../src/plugins/web/ui/composables/useComputer.js";
 import { useOperations } from "../../src/plugins/web/ui/composables/useOperations.js";
 import { useDebouncedValue } from "../../src/plugins/web/ui/composables/useDebouncedValue.js";
 import { useProjectFiles } from "../../src/plugins/web/ui/composables/useProjectFiles.js";
@@ -667,89 +664,6 @@ test("Operation global reconciliation clears a selected entity that disappeared"
   }
 });
 
-test("Computer newer status and preview responses win over older action responses", async () => {
-  const http = installHttpHarness();
-  const revision = ref(0);
-  const changes = ref({
-    status: false,
-    preview: false,
-    previewSnapshotId: null as string | null,
-    operationsReset: false,
-    operationIds: [] as string[],
-  });
-  const scope = effectScope();
-  const state = scope.run(() =>
-    useComputer(
-      () => revision.value,
-      () => changes.value,
-    ),
-  )!;
-
-  try {
-    await flush();
-    http.requests
-      .find((request) => request.url === "/api/computer/status")!
-      .resolve(computerStatus("unknown"));
-    http.requests
-      .find((request) => request.url.startsWith("/api/operations?"))!
-      .resolve([]);
-    http.requests
-      .find((request) => request.url === "/api/computer/preview")!
-      .resolve(null);
-    await flush();
-
-    const permission = state.requestPermission("accessibility");
-    await flush();
-    const permissionRequest = http.requests.at(-1)!;
-    assert.equal(
-      permissionRequest.url,
-      "/api/computer/permissions/accessibility/request",
-    );
-
-    changes.value = {
-      status: true,
-      preview: false,
-      previewSnapshotId: null,
-      operationsReset: false,
-      operationIds: [],
-    };
-    revision.value += 1;
-    await flush();
-    assert.equal(permissionRequest.signal?.aborted, true);
-    const statusRequest = http.requests.at(-1)!;
-    assert.equal(statusRequest.url, "/api/computer/status");
-    statusRequest.resolve(computerStatus("granted"));
-    await permission;
-    await flush();
-    assert.equal(state.status.value?.permissions.accessibility, "granted");
-
-    const snapshot = state.refreshSnapshot();
-    await flush();
-    const snapshotRequest = http.requests.at(-1)!;
-    assert.equal(snapshotRequest.url, "/api/computer/snapshot");
-
-    changes.value = {
-      status: false,
-      preview: true,
-      previewSnapshotId: "newer",
-      operationsReset: false,
-      operationIds: [],
-    };
-    revision.value += 1;
-    await flush();
-    assert.equal(snapshotRequest.signal?.aborted, true);
-    const previewRequest = http.requests.at(-1)!;
-    assert.equal(previewRequest.url, "/api/computer/preview");
-    previewRequest.resolve(computerPreview("newer", 2));
-    await snapshot;
-    await flush();
-    assert.equal(state.preview.value?.snapshotId, "newer");
-  } finally {
-    scope.stop();
-    http.restore();
-  }
-});
-
 test("Process stop reconciles its entity without overwriting newer SSE state and cancels on disposal", async () => {
   const http = installHttpHarness();
   const revision = ref(0);
@@ -869,7 +783,7 @@ test("Workspace Git blocks refresh during mutations and cancels old-root and dis
   }
 });
 
-for (const feature of ["process", "operations", "computer"] as const) {
+for (const feature of ["process", "operations"] as const) {
   test(`${feature} retries a failed initial list on the next entity event`, async () => {
     const http = installHttpHarness();
     const revision = ref(0);
@@ -886,30 +800,15 @@ for (const feature of ["process", "operations", "computer"] as const) {
           ids: () => state.items.value.map((item) => item.processId),
         };
       }
-      if (feature === "operations") {
-        const state = useOperations(revision, () => ({
-          changes: [{ operationId: "a", pluginId: "workspace" }],
-          clearAll: false,
-        }));
-        return {
-          listUrl: "/api/operations?limit=50&view=summary",
-          entityUrl: "/api/operations/a?view=summary",
-          item: operation("a"),
-          ids: () => state.events.value.map((item) => item.operationId),
-        };
-      }
-      const state = useComputer(revision, () => ({
-        status: false,
-        preview: false,
-        previewSnapshotId: null,
-        operationsReset: false,
-        operationIds: ["a"],
+      const state = useOperations(revision, () => ({
+        changes: [{ operationId: "a", pluginId: "workspace" }],
+        clearAll: false,
       }));
       return {
-        listUrl: "/api/operations?pluginId=computer&limit=50",
-        entityUrl: "/api/operations/a",
-        item: { ...operation("a"), pluginId: "computer" },
-        ids: () => state.operations.value.map((item) => item.operationId),
+        listUrl: "/api/operations?limit=50&view=summary",
+        entityUrl: "/api/operations/a?view=summary",
+        item: operation("a"),
+        ids: () => state.events.value.map((item) => item.operationId),
       };
     })!;
 
@@ -920,8 +819,6 @@ for (const feature of ["process", "operations", "computer"] as const) {
             { error: { code: "UNAVAILABLE", message: "retry" } },
             503,
           );
-        else if (request.url.endsWith("/status"))
-          request.resolve(computerStatus("granted"));
         else request.resolve(null);
       }
       await flush();
@@ -1003,42 +900,6 @@ test("RequestGate cannot create a current request after its Vue scope is dispose
   assert.equal(afterDispose.signal.aborted, true);
   assert.equal(gate.isCurrent(afterDispose), false);
 });
-
-function computerStatus(
-  accessibility: ComputerStatus["permissions"]["accessibility"],
-): ComputerStatus {
-  return {
-    platform: "macos",
-    helper: "running",
-    permissions: {
-      accessibility,
-      screenRecording: "granted",
-    },
-    displays: [],
-    settings: {
-      enabled: true,
-      remoteAccess: true,
-      updatedAt: "2026-01-01T00:00:00.000Z",
-    },
-  };
-}
-
-function computerPreview(
-  snapshotId: string,
-  revision: number,
-): ComputerPreviewView {
-  return {
-    snapshotId,
-    revision,
-    capturedAt: "2026-01-01T00:00:00.000Z",
-    display: null,
-    activeApp: null,
-    activeWindow: null,
-    cursor: null,
-    elementCount: 0,
-    screenshot: { mimeType: "image/png" },
-  };
-}
 
 test("debounced values settle after the delay and can be set immediately", async () => {
   const scope = effectScope();

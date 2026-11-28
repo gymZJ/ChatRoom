@@ -13,8 +13,6 @@ export type RuntimeEvent =
       output?: boolean;
       deleted?: boolean;
     }
-  | { type: "computer-settings" }
-  | { type: "computer-snapshot"; snapshotId: string }
   | {
       type: "agent";
       sessionId: string;
